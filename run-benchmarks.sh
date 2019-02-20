@@ -13,8 +13,14 @@ fi
 # user-changeable settings
 #
 listofbenchmarks='polar crap';
-phantomdir=~/phantom-nightly;
+phantomdir=~/phantom;
 htmlfile="opt-report-$SYSTEM.html";
+if [ ! -d $phantomdir ]; then
+   echo "WARNING: $phantomdir not found";
+   nographs=1;
+else
+   nographs=0;
+fi
 #
 # preset variables
 #
@@ -28,6 +34,8 @@ codelog="code.log";
 timelog="time.log";
 makelog="make.log";
 perflog="stats.txt";
+htmllog="log.html"
+list=()
 #
 # run a particular benchmark
 #
@@ -111,7 +119,7 @@ log_failure()
   line="<tr><td bgcolor=\"$red\">$name</td><td>FAILED: $msg</td><td>N/A</td>"
   rmserr=`get_rmserr`
   line+="<td>$rmserr</td></tr>"
-  echo "$line" >> ../$htmlfile;
+  echo "$line" > $htmllog;
   echo "*** $msg ***";
 }
 log_success()
@@ -136,7 +144,7 @@ log_success()
   fi
   rmserr=`get_rmserr`
   line+="<td>$rmserr</td></tr>"
-  echo "$line" >> ../$htmlfile;
+  echo "$line" > $htmllog;
   echo "TIME: ${timing}s CHANGE: ${change}%";
 }
 #
@@ -179,30 +187,64 @@ parse_results()
 }
 make_graph()
 {
-  echo "not implemented"
+  name=$1;
+  if [ -s $perflog ]; then
+     cp $perflog $name.txt;
+     $phantomdir/scripts/make_google_chart.sh $name.txt "Benchmark timings for $name test" "Performed on $HOSTNAME" "Wall time(s)" > ../$name.js
+     echo "<div id=\"$name\" style=\"width: 900px; height: 500px\"></div>" >> ../$htmlfile;
+  fi
+}
+make_graphs()
+{
+ for name in "$@"; do
+     cd $name;
+     make_graph $name;
+     cd ..;
+ done
 }
 #
 # run all benchmarks in turn
 #
 run_all_benchmarks()
 {
-  open_html_file
-  for dir in "$@"; do
+  for name in "$@"; do
       echo;
+      echo "Running ${name} benchmark..."
+      cd $name;
+      run_benchmark $name
+      cd ..;
+  done
+}
+#
+# use only directories that exist in list of arguments
+#
+get_directory_list()
+{
+  for dir in "$@"; do
       if [ -d ${dir} ]; then
-         echo "Running ${dir} benchmark..."
-         cd $dir;
-         run_benchmark $dir
-         cd ..;
-      else
-         echo "Directory '${dir}' does not exist, skipping..."
+         list+=("${dir}")
       fi
   done
-  close_html_file
+}
+collate_and_print_results()
+{
+  open_html_file "$@"
+  for name in $@; do
+      cat $name/$htmllog >> $htmlfile;
+  done
+  close_html_file "$@"
 }
 open_html_file()
 {
-  echo "<h2>Checking Phantom benchmarks, SYSTEM=$SYSTEM</h2>" > $htmlfile;
+  echo "<html>" > $htmlfile;
+  echo "<head>" >> $htmlfile;
+  echo "<script type=\"text/javascript\" src=\"https://www.gstatic.com/charts/loader.js\"></script>" >> $htmlfile;
+  for name in "$@"; do
+     if [ -e $name.js ]; then
+        echo "<script type=\"text/javascript\" src=\"$name.js\"></script>" >> $htmlfile;
+     fi
+  done
+  echo "<h2>Checking Phantom benchmarks, SYSTEM=$SYSTEM</h2>" >> $htmlfile;
   echo "<p>Benchmarks performed: `date`" >> $htmlfile;
   echo "<br/>$HOSTNAME" >> $htmlfile;
   echo "<br/>OMP_NUM_THREADS=$OMP_NUM_THREADS" >> $htmlfile;
@@ -213,13 +255,17 @@ close_html_file()
 {
   echo "</table>" >> $htmlfile;
   echo "<p>Completed $nbench benchmarks; <strong>$nfail failures</strong>; <strong>$nslow slowdowns</strong></p>" >> $htmlfile;
+  make_graphs "$@"
+  echo "</body></html>" >> $htmlfile;
+  echo; echo "output written to $htmlfile"
 }
 ########################
 # Start of main script #
 ########################
 if [ $# -le 0 ]; then
-   run_all_benchmarks $listofbenchmarks
+   get_directory_list *;
 else
-   run_all_benchmarks $@;
+   get_directory_list "$@";
 fi
-echo; echo "output written to $htmlfile"
+run_all_benchmarks ${list[@]};
+collate_and_print_results ${list[@]};
