@@ -1,0 +1,6 @@
+*.html
+Makefile
+*.prev
+diffdumps
+phantom*
+stats.txt
