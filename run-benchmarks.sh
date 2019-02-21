@@ -12,9 +12,12 @@ fi
 #
 # user-changeable settings
 #
-listofbenchmarks='polar crap';
-phantomdir=~/phantom;
+phantomdir=~/phantom-nightly/phantom-bots;
 htmlfile="opt-report-$SYSTEM.html";
+#
+# tolerance on how similar files shuold be
+#
+tol="1.e-12"
 if [ ! -d $phantomdir ]; then
    echo "WARNING: $phantomdir not found";
    nographs=1;
@@ -102,7 +105,7 @@ run_code()
   walltime=`head -1 $timelog`;
   walltime=${walltime/real/};
   # check differences
-  diffdumps ${reffile/.ref/} ${reffile} > $difflog
+  ./diffdumps ${reffile/.ref/} ${reffile} $tol > $difflog
   check=`grep FILES diff.log`
   if [ "$check" == " FILES ARE IDENTICAL " ]; then
      echo "$datetagiso $walltime" > $benchlog
