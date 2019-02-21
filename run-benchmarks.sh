@@ -12,8 +12,14 @@ fi
 #
 # user-changeable settings
 #
-phantomdir=~/phantom-nightly/phantom-bots;
-htmlfile="opt-report-$SYSTEM.html";
+if [ X$PHANTOM_DIR == X ]; then
+   echo "WARNING: Need PHANTOM_DIR environment variable set to run PHANTOM benchmarks";
+   PHANTOM_DIR=~/phantom;
+   echo "Assuming ${PHANTOM_DIR}";
+fi
+phantomdir=${PHANTOM_DIR};
+htmlfile="opt-status-$SYSTEM.html";
+htmlgraphs="opt-report-$SYSTEM.html";
 #
 # tolerance on how similar files shuold be
 #
@@ -194,7 +200,7 @@ make_graph()
   if [ -s $perflog ]; then
      cp $perflog $name.txt;
      $phantomdir/scripts/make_google_chart.sh $name.txt "Benchmark timings for $name test" "Performed on $HOSTNAME" "Wall time(s)" > ../$name.js
-     echo "<div id=\"$name\" style=\"width: 900px; height: 500px\"></div>" >> ../$htmlfile;
+     echo "<div id=\"$name\" style=\"width: 900px; height: 500px\"></div>" >> ../$htmlgraphs;
   fi
 }
 make_graphs()
@@ -231,24 +237,17 @@ get_directory_list()
 }
 collate_and_print_results()
 {
-  open_html_file "$@"
+  open_html_file
   for name in $@; do
       cat $name/$htmllog >> $htmlfile;
   done
-  close_html_file "$@"
+  close_html_file
+  write_graphs_htmlfile "$@"
 }
 open_html_file()
 {
-  echo "<html>" > $htmlfile;
-  echo "<head>" >> $htmlfile;
-  echo "<script type=\"text/javascript\" src=\"https://www.gstatic.com/charts/loader.js\"></script>" >> $htmlfile;
-  for name in "$@"; do
-     if [ -e $name.js ]; then
-        echo "<script type=\"text/javascript\" src=\"$name.js\"></script>" >> $htmlfile;
-     fi
-  done
-  echo "<h2>Checking Phantom benchmarks, SYSTEM=$SYSTEM</h2>" >> $htmlfile;
-  echo "<p>Benchmarks performed: `date`" >> $htmlfile;
+  echo "<h2>Checking Phantom benchmarks, SYSTEM=$SYSTEM</h2>" > $htmlfile;
+  echo "<p>Benchmarks completed: `date`" >> $htmlfile;
   echo "<br/>$HOSTNAME" >> $htmlfile;
   echo "<br/>OMP_NUM_THREADS=$OMP_NUM_THREADS" >> $htmlfile;
   echo "</p><table>" >> $htmlfile;
@@ -258,9 +257,24 @@ close_html_file()
 {
   echo "</table>" >> $htmlfile;
   echo "<p>Completed $nbench benchmarks; <strong>$nfail failures</strong>; <strong>$nslow slowdowns</strong></p>" >> $htmlfile;
-  make_graphs "$@"
-  echo "</body></html>" >> $htmlfile;
   echo; echo "output written to $htmlfile"
+}
+write_graphs_htmlfile()
+{
+  echo "<html>" > $htmlgraphs;
+  echo "<head>" >> $htmlgraphs;
+  echo "<script type=\"text/javascript\" src=\"https://www.gstatic.com/charts/loader.js\"></script>" >> $htmlgraphs;
+  for name in "$@"; do
+     if [ -e $name.js ]; then
+        echo "<script type=\"text/javascript\" src=\"$name.js\"></script>" >> $htmlgraphs;
+     fi
+  done
+  echo "</head><body>" >> $htmlgraphs;
+  echo "<h1>Phantom nightly benchmarking</h1>" >> $htmlgraphs;
+  echo "<p>[<a href=\"../build/index.html\">Nightly build report</a>] [<a href=\"../logs/\">build logs</a>]</p>" >> $htmlgraphs;
+  make_graphs "$@"
+  echo "</body></html>" >> $htmlgraphs;
+  echo "plots written to $htmlgraphs"
 }
 ########################
 # Start of main script #
