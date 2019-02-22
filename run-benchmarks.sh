@@ -9,26 +9,28 @@ if [ X$SYSTEM == X ]; then
    echo "Usage: $0";
    exit;
 fi
-#
-# user-changeable settings
-#
+if [ X$OMP_NUM_THREADS == X ]; then
+   echo "Error: Need OMP_NUM_THREADS environment variable set to run PHANTOM benchmarks";
+   echo "Usage: $0";
+   exit;
+fi
 if [ X$PHANTOM_DIR == X ]; then
    echo "WARNING: Need PHANTOM_DIR environment variable set to run PHANTOM benchmarks";
    PHANTOM_DIR=~/phantom;
    echo "Assuming ${PHANTOM_DIR}";
 fi
+#
+# user-changeable settings
+#
 phantomdir=${PHANTOM_DIR};
+nthreads=${OMP_NUM_THREADS};
 htmlfile="opt-status-$SYSTEM.html";
-htmlgraphs="opt-report-$SYSTEM.html";
 #
 # tolerance on how similar files shuold be
 #
 tol="1.e-12"
 if [ ! -d $phantomdir ]; then
    echo "WARNING: $phantomdir not found";
-   nographs=1;
-else
-   nographs=0;
 fi
 #
 # preset variables
@@ -37,13 +39,13 @@ datetagiso=`date "+%Y-%m-%d %H:%M:%S %z"`;
 red="#FF0000";
 amber="#FF6600";
 green="#009900";
-difflog="diff.log";
-benchlog="bench.log";
-codelog="code.log";
-timelog="time.log";
-makelog="make.log";
-perflog="stats.txt";
-htmllog="log.html"
+difflog="diff-$SYSTEM-$nthreads.log";
+benchlog="bench-$SYSTEM-$nthreads.log";
+codelog="code-$SYSTEM-$nthreads.log";
+timelog="time-$SYSTEM-$nthreads.log";
+makelog="make-$SYSTEM.log";
+perflog="stats-$SYSTEM-$nthreads.txt";
+htmllog="log-$SYSTEM.html"
 list=()
 #
 # run a particular benchmark
@@ -77,14 +79,17 @@ check_benchmark_dir()
 run_benchmark()
 {
    name=$1;
+   echo "Checking ${name} benchmark..."
    rm -f $benchlog $difflog $codelog $timelog $makelog;
    nbench=$(( nbench + 1 ));
    msg=`check_benchmark_dir`
    if [ "X$msg" != "X" ]; then
       log_failure $name "$msg"
    else
+      echo "Building ${name} benchmark..."
       make >& $makelog; err=$?
       if [ $err -eq 0 ]; then
+         echo "Running ${name} benchmark..."
          run_code
          parse_results $name
       else
@@ -116,7 +121,7 @@ run_code()
   if [ "$check" == " FILES ARE IDENTICAL " ]; then
      echo "$datetagiso $walltime" > $benchlog
   else
-     echo "$datetagiso failed" > $benchlog
+     echo "$datetagiso 0.0" > $benchlog
   fi
   cat $benchlog >> $perflog
 }
@@ -194,23 +199,6 @@ parse_results()
      log_failure $name "results differ from reference";
   fi
 }
-make_graph()
-{
-  name=$1;
-  if [ -s $perflog ]; then
-     cp $perflog $name.txt;
-     $phantomdir/scripts/make_google_chart.sh $name.txt "Benchmark timings for $name test" "Performed on $HOSTNAME" "Wall time(s)" > ../$name.js
-     echo "<div id=\"$name\" style=\"width: 900px; height: 500px\"></div>" >> ../$htmlgraphs;
-  fi
-}
-make_graphs()
-{
- for name in "$@"; do
-     cd $name;
-     make_graph $name;
-     cd ..;
- done
-}
 #
 # run all benchmarks in turn
 #
@@ -218,7 +206,6 @@ run_all_benchmarks()
 {
   for name in "$@"; do
       echo;
-      echo "Running ${name} benchmark..."
       cd $name;
       run_benchmark $name
       cd ..;
@@ -242,7 +229,6 @@ collate_and_print_results()
       cat $name/$htmllog >> $htmlfile;
   done
   close_html_file
-  write_graphs_htmlfile "$@"
 }
 open_html_file()
 {
@@ -258,23 +244,6 @@ close_html_file()
   echo "</table>" >> $htmlfile;
   echo "<p>Completed $nbench benchmarks; <strong>$nfail failures</strong>; <strong>$nslow slowdowns</strong></p>" >> $htmlfile;
   echo; echo "output written to $htmlfile"
-}
-write_graphs_htmlfile()
-{
-  echo "<html>" > $htmlgraphs;
-  echo "<head>" >> $htmlgraphs;
-  echo "<script type=\"text/javascript\" src=\"https://www.gstatic.com/charts/loader.js\"></script>" >> $htmlgraphs;
-  for name in "$@"; do
-     if [ -e $name.js ]; then
-        echo "<script type=\"text/javascript\" src=\"$name.js\"></script>" >> $htmlgraphs;
-     fi
-  done
-  echo "</head><body>" >> $htmlgraphs;
-  echo "<h1>Phantom nightly benchmarking</h1>" >> $htmlgraphs;
-  echo "<p>[<a href=\"../build/index.html\">Nightly build report</a>] [<a href=\"../logs/\">build logs</a>]</p>" >> $htmlgraphs;
-  make_graphs "$@"
-  echo "</body></html>" >> $htmlgraphs;
-  echo "plots written to $htmlgraphs"
 }
 ########################
 # Start of main script #
