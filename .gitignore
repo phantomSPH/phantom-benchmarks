@@ -1,6 +1,11 @@
 *.html
 Makefile
 *.prev
+*.log
+*.ev
+*.in
+*.txt
+*.js
 diffdumps
 phantom*
 stats.txt
