@@ -87,7 +87,7 @@ write_graphs_htmlfile()
   done
   echo "</head><body>" >> $htmlfile;
   echo "<h1>Phantom nightly benchmarking</h1>" >> $htmlfile;
-  echo "<p>[<a href=\"../build/index.html\">Nightly build report</a>] [<a href=\"../logs/\">build logs</a>]</p>" >> $htmlfile;
+  echo "<p>[<a href=\"https://phantomsph.bitbucket.io/\">Phantom home</a>] [<a href=\"../index.html\">Nightly home</a>] [<a href=\"../build/index.html\">Build report</a>] [<a href=\"../opt/index.html\">Performance report</a>] [<a href=\"../stats/index.html\">Statistics</a>]</p>" >> $htmlfile;
   make_graphs "$@"
   echo "</body></html>" >> $htmlfile;
   echo; echo "plots written to $htmlfile"
