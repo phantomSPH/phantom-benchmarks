@@ -11,30 +11,40 @@ if [ X$PHANTOM_DIR == X ]; then
    PHANTOM_DIR=~/phantom;
    echo "Assuming ${PHANTOM_DIR}";
 fi
+list=()
 #
 # make a graph from the output files
 #
 collate_results()
 {
+   n=0;
    timings='';
    for x in time*.log; do
-       systemnames+=" ${x/.log/}";
-       walltime=`head -1 $x`;
-       timings+=${walltime/real/};
-       benchlog=${x/time/bench};
-       date=`tail -1 $benchlog | cut -d' ' -f 1`
-       time=`tail -1 $benchlog | cut -d' ' -f 2`
-       tz=`tail -1 $benchlog | cut -d' ' -f 3`
+       if [ -s $x ]; then
+          n=$(( n + 1 ));
+          systemnames+=" ${x/.log/}";
+          walltime=`head -1 $x`;
+          timings+=${walltime/real/};
+          benchlog=${x/time/bench};
+          date=`tail -1 $benchlog | cut -d' ' -f 1`
+          time=`tail -1 $benchlog | cut -d' ' -f 2`
+          tz=`tail -1 $benchlog | cut -d' ' -f 3`
+       fi
    done
+   echo; echo "$PWD"
    # append data to file, but only if new data found
-   line="$date $time $tz $timings"
-   lastline=`tail -1 $perflog`
-   echo "GOT ${line}"
-   echo "WAS ${lastline}"
-   if [ "$line" != "$lastline" ]; then
-      echo "$date $time $tz $timings" >> $perflog;
+   if (( $n > 0 )); then
+      line="$date $time $tz $timings"
+      lastline=`tail -1 $perflog`
+      echo "GOT ${line}"
+      echo "WAS ${lastline}"
+      if [ "$line" != "$lastline" ]; then
+         echo "$date $time $tz $timings" >> $perflog;
+      else
+         echo "no new data found"
+      fi
    else
-      echo "no new data found"
+      echo "no benchmark logs found"
    fi
 }
 #
@@ -80,6 +90,22 @@ write_graphs_htmlfile()
   echo "<p>[<a href=\"../build/index.html\">Nightly build report</a>] [<a href=\"../logs/\">build logs</a>]</p>" >> $htmlfile;
   make_graphs "$@"
   echo "</body></html>" >> $htmlfile;
-  echo "plots written to $htmlfile"
+  echo; echo "plots written to $htmlfile"
 }
-write_graphs_htmlfile "$@"
+#
+# find subdirectories
+#
+get_directory_list()
+{
+  for dir in "$@"; do
+      if [ -d ${dir} ]; then
+         list+=("${dir}")
+      fi
+  done
+}
+if [ $# -le 0 ]; then
+   get_directory_list *;
+else
+   get_directory_list "$@";
+fi
+write_graphs_htmlfile ${list[@]};
