@@ -6,12 +6,12 @@
 #
 if [ X$SYSTEM == X ]; then
    echo "Error: Need SYSTEM environment variable set to run PHANTOM benchmarks";
-   echo "Usage: $0";
+   echo "Usage: $0 [list of directories]";
    exit;
 fi
 if [ X$OMP_NUM_THREADS == X ]; then
    echo "Error: Need OMP_NUM_THREADS environment variable set to run PHANTOM benchmarks";
-   echo "Usage: $0";
+   echo "Usage: $0 [list of directories]";
    exit;
 fi
 if [ X$PHANTOM_DIR == X ]; then

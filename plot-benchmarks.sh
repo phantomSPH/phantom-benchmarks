@@ -5,7 +5,6 @@
 #
 htmlfile="performance.html";
 perflog="stats.txt";
-datetagiso=`date "+%Y-%m-%d %H:%M:%S %z"`;
 systemnames=''
 if [ X$PHANTOM_DIR == X ]; then
    echo "WARNING: Need PHANTOM_DIR environment variable set to run PHANTOM benchmarks";
@@ -27,6 +26,7 @@ collate_results()
        time=`tail -1 $benchlog | cut -d' ' -f 2`
        tz=`tail -1 $benchlog | cut -d' ' -f 3`
    done
+   # append data to file, but only if new data found
    line="$date $time $tz $timings"
    lastline=`tail -1 $perflog`
    echo "GOT ${line}"
