@@ -117,7 +117,7 @@ run_code()
   walltime=${walltime/real/};
   # check differences
   ./diffdumps ${reffile/.ref/} ${reffile} $tol > $difflog
-  check=`grep FILES diff.log`
+  check=`grep FILES $difflog`
   if [ "$check" == " FILES ARE IDENTICAL " ]; then
      echo "$datetagiso $walltime" > $benchlog
   else
@@ -166,7 +166,7 @@ log_success()
 #
 get_rmserr()
 {
-  rmserr=`grep 'RMS ERROR' diff.log | cut -d':' -f 2`;
+  rmserr=`grep 'RMS ERROR' $difflog | cut -d':' -f 2`;
   if [ "X$rmserr" == "X" ]; then
      echo "N/A"
   else
