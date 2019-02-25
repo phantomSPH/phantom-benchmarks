@@ -25,6 +25,7 @@ fi
 phantomdir=${PHANTOM_DIR};
 nthreads=${OMP_NUM_THREADS};
 htmlfile="opt-status-$SYSTEM.html";
+codebinary="./phantom";
 #
 # tolerance on how similar files shuold be
 #
@@ -87,8 +88,11 @@ run_benchmark()
       log_failure $name "$msg"
    else
       echo "Building ${name} benchmark..."
-      make >& $makelog; err=$?
-      if [ $err -eq 0 ]; then
+      rm -f $codebinary;
+      make >& $makelog;
+      # check for no errors from Make process
+      grep '\*\*\*' $makelog; err=$?;
+      if [ $err -ne 0 -a -e $codebinary ]; then
          echo "Running ${name} benchmark..."
          run_code
          parse_results $name
@@ -110,8 +114,9 @@ run_code()
   infile=${sfile/.in.s/.in};
   # copy blah.in.s blah.in
   cp ${sfile} ${infile};
+  rm -f ${reffile/.ref/};
   # run code and time it
-  time -p (./phantom $infile >& $codelog) >& $timelog;
+  time -p ($codebinary $infile >& $codelog) >& $timelog;
   #walltime=`grep 'Total wall time' $codelog | cut -d'=' -f 2 | cut -d's' -f 1`
   walltime=`head -1 $timelog`;
   walltime=${walltime/real/};
@@ -120,10 +125,11 @@ run_code()
   check=`grep FILES $difflog`
   if [ "$check" == " FILES ARE IDENTICAL " ]; then
      echo "$datetagiso $walltime" > $benchlog
+     echo "$datetagiso $walltime" >> $perflog
   else
-     echo "$datetagiso 0.0" > $benchlog
+     echo "$datetagiso failed" > $benchlog
+     echo "$datetagiso 0.0" >> $perflog
   fi
-  cat $benchlog >> $perflog
 }
 log_failure()
 {
@@ -195,6 +201,8 @@ parse_results()
   elif [ "X${fail}X" == "XX" ]; then
      log_success $name $results;
      cp ${benchlog} ${benchlog}.prev;
+  elif [ ! -e ${reffile/.ref/} ]; then
+     log_failure $name "did not complete";
   else
      log_failure $name "results differ from reference";
   fi
