@@ -14,10 +14,10 @@ foreach my $file (@ARGV) {
       #print "$_\n";
       my $line="$_";
       if ($line =~ m/SYSTEM=(\w+)\W/) {
-         print "SYSTEM=$1\\n";
+         print "*SYSTEM=$1*\n";
       }
       if ($line =~ m/\<td bgcolor=\".*\"\>(\w+)\<\/td\>\<td\>(.*)\<\/td\>\<td.*\>(.*)\<\/td\>\<td\>(.*)\<\/td\>\<\/tr\>/) {
-         print "$1: ${2}s change $3% error $4\\n";
+         print "*$1*: ${2}s change $3% error $4\\n";
       }
    }
 }
