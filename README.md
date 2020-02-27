@@ -21,9 +21,26 @@ where arguments are subdirectories of the current one
 git clone https://bitbucket.org/danielprice/phantom-benchmarks
 ```
 2. make a new directory
+```
+cd phantom-benchmarks
+mkdir mybench
+cd mybench
+```
 3. add the phantom input file with ".in.s" as the file extension
+```
+cp mybench.in mybench.in.s
+```
 4. add the reference dump file to which results should be compared, with ".ref" as the file extension
+```
+cp mybench_00001 mybench_00001.ref
+```
 5. ensure your calculation is SHORT (runs in < 2 minutes) but REPRESENTATIVE, e.g. with typical particle numbers and timestep ranges
+6. commit and push the benchmark to the repository
+```
+git add mybench.in.s mybench_00000 mybench_00001.ref SETUP
+git commit -m 'added benchmark mybench'
+git push
+```
 
 ## problems with git-lfs
 
