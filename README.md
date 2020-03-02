@@ -1,7 +1,7 @@
 # Phantom benchmark suite
 Benchmarking and performance suite for the phantom code http://bitbucket.org/danielprice/phantom
  
- Tests in this repo are run nightly and checked for speed and are used for performance evaluation/code scaling tests
+ Tests in this repo are run nightly and checked for speed and are used for performance evaluation/code scaling tests. Results are currently published to http://phantomsph.bitbucket.io/nightly/opt/
 
 ## Run all benchmarks
 ```
