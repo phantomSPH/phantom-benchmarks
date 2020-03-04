@@ -5,19 +5,20 @@
 #
 htmlfile="performance.html";
 perflog="stats.txt";
-systemnames=''
 if [ X$PHANTOM_DIR == X ]; then
    echo "WARNING: Need PHANTOM_DIR environment variable set to run PHANTOM benchmarks";
    PHANTOM_DIR=~/phantom;
    echo "Assuming ${PHANTOM_DIR}";
 fi
 list=()
+systemnames=''
 #
 # make a graph from the output files
 #
 collate_results()
 {
    n=0;
+   systemnames=''
    timings='';
    for x in time*.log; do
        if [ -s $x ]; then
