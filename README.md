@@ -1,5 +1,5 @@
 # Phantom benchmark suite
-Benchmarking and performance suite for the phantom code http://bitbucket.org/danielprice/phantom
+Benchmarking and performance suite for the phantom code http://github.com/danieljprice/phantom
  
  Tests in this repo are run nightly and checked for speed and are used for performance evaluation/code scaling tests. Results are currently published to http://phantomsph.bitbucket.io/nightly/opt/
 
@@ -18,7 +18,7 @@ where arguments are subdirectories of the current one
 
 1. clone the repository to your local machine
 ```
-git clone https://bitbucket.org/danielprice/phantom-benchmarks
+git clone https://github.com/phantomSPH/phantom-benchmarks
 ```
 2. make a new directory
 ```
