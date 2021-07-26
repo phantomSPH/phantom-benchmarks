@@ -263,4 +263,4 @@ else
 fi
 run_all_benchmarks ${list[@]};
 collate_and_print_results ${list[@]};
-if [ "$nfail" > 0 ] && [ "$RETURN_ERR" == "yes" ]; then exit 1; fi
+if [ "$nfail" -gt 0 ] && [ "$RETURN_ERR" == "yes" ]; then exit 1; fi
