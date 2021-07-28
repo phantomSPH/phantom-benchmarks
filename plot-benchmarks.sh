@@ -82,9 +82,7 @@ write_graphs_htmlfile()
   echo "<head>" >> $htmlfile;
   echo "<script type=\"text/javascript\" src=\"https://www.gstatic.com/charts/loader.js\"></script>" >> $htmlfile;
   for name in "$@"; do
-     if [ -e $name.js ]; then
-        echo "<script type=\"text/javascript\" src=\"$name.js\"></script>" >> $htmlfile;
-     fi
+      echo "<script type=\"text/javascript\" src=\"$name.js\"></script>" >> $htmlfile;
   done
   echo "</head><body>" >> $htmlfile;
   echo "<h1>Phantom nightly benchmarking</h1>" >> $htmlfile;
