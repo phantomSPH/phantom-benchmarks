@@ -116,7 +116,12 @@ run_code()
   cp ${sfile} ${infile};
   rm -f ${reffile/.ref/};
   # run code and time it
-  time -p ($codebinary $infile >& $codelog) >& $timelog;
+  if [[ $MPI == "yes" ]]; then
+    mpirun="mpirun -np 4"
+  else
+    mpirun=""
+  fi
+  time -p ($mpirun $codebinary $infile >& $codelog) >& $timelog;
   #walltime=`grep 'Total wall time' $codelog | cut -d'=' -f 2 | cut -d's' -f 1`
   walltime=`head -1 $timelog`;
   walltime=${walltime/real/};
