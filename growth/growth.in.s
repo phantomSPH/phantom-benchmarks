@@ -1,4 +1,4 @@
-# Runtime options file for Phantom, written 28/01/2022 12:36:16.4
+# Runtime options file for Phantom, written 26/02/2020 15:58:51.8
 # Options not present assume their default values
 # This file is updated automatically after a full dump
 
@@ -10,7 +10,7 @@
                 tmax =   103.24327    ! end time
                dtmax =   103.24327    ! time between dumps
                 nmax =          -1    ! maximum number of timesteps (0=just get derivs and stop)
-                nout =          -1    ! write dumpfile every n dtmax (-ve=ignore)
+                nout =          -1    ! number of steps between dumps (-ve=ignore)
            nmaxdumps =          -1    ! stop after n full dumps (-ve=ignore)
             twallmax =      000:00    ! maximum wall time (hhh:mm, 000:00=ignore)
            dtwallmax =      012:00    ! maximum wall time between dumps (hhh:mm, 000:00=ignore)
@@ -25,8 +25,7 @@
                 tolh =   1.000E-04    ! tolerance on h-rho iterations
 
 # options controlling hydrodynamics, artificial dissipation
-               alpha =  6.16216495    ! MINIMUM art. viscosity parameter
-            alphamax =       1.000    ! MAXIMUM art. viscosity parameter
+               alpha =  6.16216495    ! art. viscosity parameter
                 beta =       2.000    ! beta viscosity
         avdecayconst =       0.100    ! decay time constant for viscosity switches
 
@@ -37,15 +36,19 @@
                 ieos =           3    ! eqn of state (1=isoth;2=adiab;3=locally iso;8=barotropic)
                   mu =       2.381    ! mean molecular weight
 
+# options controlling sink particles
+     h_soft_sinksink =       0.000    ! softening length between sink particles
+               f_acc =       0.800    ! particles < f_acc*h_acc accreted without checks
+
 # options relating to external forces
-      iexternalforce =           0    ! 1=star,2=coro,3=bina,4=prdr,5=toru,6=toys,7=exte,8=spir,9=Lens,10=dens,11=Eins,
+      iexternalforce =           0    ! 1=star,2=coro,3=bina,4=prdr,5=toru,6=toys,7=exte,8=spir,9=Lens,10=neut,11=Eins,
 
 # options controlling physical viscosity
            irealvisc =           0    ! physical viscosity type (0=none,1=const,2=Shakura/Sunyaev)
           shearparam =       0.100    ! magnitude of shear viscosity (irealvisc=1) or alpha_SS (irealvisc=2)
             bulkvisc =       0.000    ! magnitude of bulk viscosity
 
-# options controlling dust (0 dust species)
+# options controlling dust (1 dust species)
                idrag =           1    ! gas/dust drag (0=off,1=Epstein/Stokes,2=const K,3=const ts)
            grainsize =       1.000    ! Initial grain size in cm
            graindens =       1.000    ! Intrinsic grain density in g/cm^3
@@ -58,6 +61,3 @@
 
 # options for injecting/removing particles
                rkill =      -1.000    ! deactivate particles outside this radius (<0 is off)
-
-# gravitational waves
-                  gw =           F    ! calculate gravitational wave strain

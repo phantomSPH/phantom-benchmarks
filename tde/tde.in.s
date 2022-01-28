@@ -1,4 +1,4 @@
-# Runtime options file for Phantom, written 28/01/2022 12:48:22.3
+# Runtime options file for Phantom, written 02/03/2021 15:11:38.0
 # Options not present assume their default values
 # This file is updated automatically after a full dump
 
@@ -9,8 +9,8 @@
 # options controlling run time and input/output
                 tmax =   6.428E+06    ! end time
                dtmax =  16.0722177    ! time between dumps
-                nmax =           1    ! maximum number of timesteps (0=just get derivs and stop)
-                nout =          -1    ! write dumpfile every n dtmax (-ve=ignore)
+                nmax =          1    ! maximum number of timesteps (0=just get derivs and stop)
+                nout =          -1    ! number of steps between dumps (-ve=ignore)
            nmaxdumps =          -1    ! stop after n full dumps (-ve=ignore)
             twallmax =      000:00    ! maximum wall time (hhh:mm, 000:00=ignore)
            dtwallmax =      012:00    ! maximum wall time between dumps (hhh:mm, 000:00=ignore)
@@ -28,8 +28,7 @@
        tree_accuracy =       0.500    ! tree opening criterion (0.0-1.0)
 
 # options controlling hydrodynamics, artificial dissipation
-               alpha =       1.000    ! MINIMUM art. viscosity parameter
-            alphamax =       1.000    ! MAXIMUM art. viscosity parameter
+               alpha =       1.000    ! art. viscosity parameter
               alphau =       0.100    ! art. conductivity parameter
                 beta =       1.000    ! beta viscosity
         avdecayconst =       0.100    ! decay time constant for viscosity switches
@@ -44,15 +43,12 @@
       ishock_heating =           1    ! shock heating (0=off, 1=on)
 
 # options controlling cooling
-              C_cool =       0.050    ! factor controlling cooling timestep
-            icooling =           0    ! cooling function (0=off, 1=explicit, 2=Townsend table, 3=Gammie, 5=KI02)
+            icooling =           0    ! cooling function (0=off, 1=Gammie cooling 2=SD93 3=cooling function)
 
 # options controlling sink particles
        icreate_sinks =           0    ! allow automatic sink particle creation
      h_soft_sinksink =       0.000    ! softening length between sink particles
                f_acc =       0.800    ! particles < f_acc*h_acc accreted without checks
-      r_merge_uncond =       0.000    ! sinks will unconditionally merge within this separation
-        r_merge_cond =       0.000    ! sinks will merge if bound within this radius
 
 # options relating to GR external forces
           accradius1 =       5.000    ! soft accretion radius of black hole
@@ -63,12 +59,6 @@
           shearparam =       0.100    ! magnitude of shear viscosity (irealvisc=1) or alpha_SS (irealvisc=2)
             bulkvisc =       0.000    ! magnitude of bulk viscosity
 
-# options for injecting/removing particles
-               rkill =      -1.000    ! deactivate particles outside this radius (<0 is off)
-
 # options relating to the Kerr metric
                mass1 =       1.000    ! black hole mass in code units
                    a =       0.000    ! spin parameter for Kerr metric
-
-# gravitational waves
-                  gw =           F    ! calculate gravitational wave strain
