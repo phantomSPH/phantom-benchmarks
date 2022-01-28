@@ -1,4 +1,4 @@
-# Runtime options file for Phantom, written 27/02/2020 16:14:39.6
+# Runtime options file for Phantom, written 28/01/2022 12:42:23.2
 # Options not present assume their default values
 # This file is updated automatically after a full dump
 
@@ -10,7 +10,7 @@
                 tmax =   7.000E+05    ! end time
                dtmax =       1.000    ! time between dumps
                 nmax =          -1    ! maximum number of timesteps (0=just get derivs and stop)
-                nout =          -1    ! number of steps between dumps (-ve=ignore)
+                nout =          -1    ! write dumpfile every n dtmax (-ve=ignore)
            nmaxdumps =           1    ! stop after n full dumps (-ve=ignore)
             twallmax =      000:00    ! maximum wall time (hhh:mm, 000:00=ignore)
            dtwallmax =      012:00    ! maximum wall time between dumps (hhh:mm, 000:00=ignore)
@@ -42,15 +42,18 @@
       ishock_heating =           1    ! shock heating (0=off, 1=on)
 
 # options controlling cooling
-            icooling =           0    ! cooling function (0=off, 1=Gammie cooling 2=SD93 3=cooling function)
+              C_cool =       0.050    ! factor controlling cooling timestep
+            icooling =           0    ! cooling function (0=off, 1=explicit, 2=Townsend table, 3=Gammie, 5=KI02)
 
 # options controlling sink particles
        icreate_sinks =           0    ! allow automatic sink particle creation
      h_soft_sinksink =       0.000    ! softening length between sink particles
                f_acc =       0.800    ! particles < f_acc*h_acc accreted without checks
+      r_merge_uncond =       0.000    ! sinks will unconditionally merge within this separation
+        r_merge_cond =       0.000    ! sinks will merge if bound within this radius
 
 # options relating to external forces
-      iexternalforce =           0    ! 1=star,2=coro,3=bina,4=prdr,5=toru,6=toys,7=exte,8=spir,9=Lens,10=neut,11=Eins,
+      iexternalforce =           0    ! 1=star,2=coro,3=bina,4=prdr,5=toru,6=toys,7=exte,8=spir,9=Lens,10=dens,11=Eins,
 
 # options controlling physical viscosity
            irealvisc =           0    ! physical viscosity type (0=none,1=const,2=Shakura/Sunyaev)
@@ -59,3 +62,6 @@
 
 # options for injecting/removing particles
                rkill =      -1.000    ! deactivate particles outside this radius (<0 is off)
+
+# gravitational waves
+                  gw =           F    ! calculate gravitational wave strain
