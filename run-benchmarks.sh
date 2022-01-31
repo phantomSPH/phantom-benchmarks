@@ -26,6 +26,7 @@ phantomdir=${PHANTOM_DIR};
 nthreads=${OMP_NUM_THREADS};
 htmlfile="opt-status-$SYSTEM.html";
 codebinary="./phantom";
+reference_server="http://data.phantom.cloud.edu.au/data/benchmarks"
 #
 # tolerance on how similar files shuold be
 #
@@ -80,6 +81,7 @@ check_benchmark_dir()
 run_benchmark()
 {
    name=$1;
+   download_reference
    echo "Checking ${name} benchmark..."
    rm -f $benchlog $difflog $codelog $timelog $makelog;
    nbench=$(( nbench + 1 ));
@@ -101,6 +103,27 @@ run_benchmark()
       fi
    fi
 }
+# Download reference data files which
+# are not commited to the repository
+download_reference()
+{
+   while read line; do
+      file=$(echo "$line" | cut -d ' ' -f 3)
+
+      if test -f "$file"; then
+         echo "Reference file $file already exists."
+      else
+         echo "Downloading ${reference_server}/${file}"
+         curl -fLO# "${reference_server}/${file}"
+      fi
+
+   done < .hashlist
+
+   echo "Inspecting checksums..."
+   shasum -a 256 -c .hashlist
+
+}
+
 #
 # run code and generate timing output
 # could replace this routine with
