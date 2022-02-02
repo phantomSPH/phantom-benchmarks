@@ -144,7 +144,22 @@ run_code()
   else
     mpirun=""
   fi
-  time -p ($mpirun $codebinary $infile >& $codelog) >& $timelog;
+  infile_changed=1
+  while [ $infile_changed -eq 1 ]; do
+    cp ${infile} infile.orig;
+    time -p ($mpirun $codebinary $infile >& $codelog) >& $timelog;
+    # Continue if the code ran fine
+    if [ $? -eq 0 ]; then
+      break
+    fi
+    # Otherwise, check if the .in file was rewritten
+    cmp -s ${infile} infile.orig
+    infile_changed=$?
+    if [ $infile_changed -eq 1 ]; then
+      echo "${infile} was modified, re-running phantom..."
+    fi
+  done
+  rm infile.orig;
   #walltime=`grep 'Total wall time' $codelog | cut -d'=' -f 2 | cut -d's' -f 1`
   walltime=`head -1 $timelog`;
   walltime=${walltime/real/};
