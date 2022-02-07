@@ -3,12 +3,12 @@
 # This file is updated automatically after a full dump
 
 # job name
-             logfile =  gasrad01.log   ! file to which output is directed
-            dumpfile =  gasrad_00310   ! dump file to start from
+             logfile =  commonenv01.log   ! file to which output is directed
+            dumpfile =  commonenv_00310 ! dump file to start from
 
 # options controlling run time and input/output
                 tmax =   8.000E+05    ! end time
-               dtmax =         50.    ! time between dumps
+               dtmax =          5.    ! time between dumps
                 nmax =          -1    ! maximum number of timesteps (0=just get derivs and stop)
                 nout =          -1    ! write dumpfile every n dtmax (-ve=ignore)
            nmaxdumps =           1    ! stop after n full dumps (-ve=ignore)
