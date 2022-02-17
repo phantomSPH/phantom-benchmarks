@@ -165,9 +165,10 @@ run_code()
   walltime=${walltime/real/};
   # check differences
   # "| cat" is a workaround for macOS: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=102992
-  ./diffdumps ${reffile/.ref/} ${reffile} $tol | cat > $difflog
-  check=`grep FILES $difflog`
-  if [ "$check" == " FILES ARE IDENTICAL " ]; then
+  diff=`./diffdumps ${reffile/.ref/} ${reffile} $tol`;
+  ndiff=$?
+  echo "$diff" > $difflog
+  if [ $ndiff -eq 0 ]; then
      echo "$datetagiso $walltime" > $benchlog
      echo "$datetagiso $walltime" >> $perflog
   else
