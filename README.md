@@ -48,12 +48,11 @@ cp mybench_00001 mybench_00001.ref
 
 7. Open an Issue to make a request for the dump files to be copied to the web server (http://data.phantom.cloud.edu.au/data/benchmarks/)
 
-8. Paste the checksums into a file named `.hashlist` in the test directory, for example
+8. Create a file named `.hashlist`, which points to files to be automatically downloaded at run time. Generate the SHA1 checksums for your files using `shasum` or `sha1sum`, depending on your system (e.g.`shasum mybench_00000`). Your file should look like this:
 ```
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000.ref
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00001.ref
 ```
-These files are automatically downloaded at run time.
 
 9. Commit and push the benchmark to the repository, excluding the dump files (to avoid bloating the repository)
 ```
