@@ -20,35 +20,41 @@ where arguments are subdirectories of the current one
 ```
 git clone https://github.com/phantomSPH/phantom-benchmarks
 ```
+
 2. Make a new directory
 ```
 cd phantom-benchmarks
 mkdir mybench
 cd mybench
 ```
+
 3. Add the phantom input file with ".in.s" as the file extension
 ```
 cp mybench.in mybench.in.s
 ```
+
 4. Add the reference dump file to which results should be compared, with ".ref" as the file extension
 ```
 cp mybench_00001 mybench_00001.ref
 ```
+
 5. Ensure your calculation is SHORT (runs in < 2 minutes) but REPRESENTATIVE, e.g. with typical particle numbers and timestep ranges
+
 6. Verify that the test passes by running
 ```
 ./run-benchmarks mybench
 ```
-in the root directory
+
+
 7. Open an Issue to make a request for the dump files to be copied to the web server (http://data.phantom.cloud.edu.au/data/benchmarks/)
-8. Paste the checksums into a file named `.hashlist` in the test directory, for example
+
+8. Create a file named `.hashlist`, which points to the files that need to be automatically downloaded at run time. Generate the SHA1 checksums for your files using `shasum` (or `sha1sum`, depending on your system). For example, `shasum mybench_00000`. Your file should look like this:
 ```
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000.ref
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00001.ref
 ```
-These files are automatically downloaded at run time.
 
-6. Commit and push the benchmark to the repository, excluding the dump files (to avoid bloating the repository)
+9. Commit and push the benchmark to the repository, excluding the dump files (to avoid bloating the repository)
 ```
 git add mybench.in.s SETUP .hashlist
 git commit -m 'added benchmark mybench'
