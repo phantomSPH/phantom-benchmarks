@@ -33,6 +33,8 @@ reference_server="http://data.phantom.cloud.edu.au/data/benchmarks"
 tol="1.e-12"
 if [ ! -d $phantomdir ]; then
    echo "WARNING: $phantomdir not found";
+else
+   echo "Using phantom from $phantomdir";
 fi
 #
 # preset variables
@@ -59,19 +61,19 @@ err=0
 check_benchmark_dir()
 {
    errlog=''
-   if [ ! -e Makefile ]; then
-      if [ ! -e SETUP ]; then
-         errlog="setup not found"
-      else
-         $phantomdir/scripts/writemake.sh `cat SETUP` > Makefile
-      fi
+   #if [ ! -e Makefile ]; then
+   if [ ! -e SETUP ]; then
+      errlog="setup not found"
+   else
+      $phantomdir/scripts/writemake.sh `cat SETUP` > Makefile
    fi
+   #fi
    ls *.in.s *.ref > /dev/null; err=$?;
    if [ ! $err -eq 0 ]; then
       errlog+=": infiles not found"
    fi
    if [ ! -e diffdumps ]; then
-      make diffdumps >& /dev/null
+      make diffdumps > make-diffdumps.log;
       if [ ! -e diffdumps ]; then
          errlog+=": diffdumps not found"
       fi
