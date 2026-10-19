@@ -4,7 +4,7 @@ name: pages
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
     paths: [ 'results/**', 'scripts/report.py', '.github/workflows/pages.yml' ]
   workflow_dispatch:
 
@@ -13,25 +13,33 @@ permissions:
   pages: write
   id-token: write
 
+# do not cancel a deployment in progress, but skip runs queued behind it
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  # separate build and deploy jobs, so a failed deployment can be re-run
+  # without uploading a second copy of the site
   build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install matplotlib
+      - run: ./phantombench site site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install matplotlib
-      - run: ./phantombench site site
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
