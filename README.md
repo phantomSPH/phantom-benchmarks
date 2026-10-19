@@ -1,18 +1,117 @@
 # Phantom benchmark suite
-Benchmarking and performance suite for the phantom code http://github.com/danieljprice/phantom
 
- Tests in this repo are run nightly and checked for speed and are used for performance evaluation/code scaling tests. Results are currently published to http://phantomsph.bitbucket.io/nightly/opt/
+Benchmarking and performance suite for the [Phantom](https://github.com/danieljprice/phantom) SPH code. Use it to:
 
-## Run all benchmarks
+- compare compilers and compiler options on a machine;
+- check that a claimed optimisation is faster and still correct (run automatically on Phantom pull requests);
+- produce strong-scaling tables, figures and service unit estimates for computing time applications;
+- test performance on a new machine.
+
+Results are stored as `.csv` files in [results/](results/), one directory per machine. They are published at https://phantomsph.github.io/phantom-benchmarks/.
+
+## Quick start (any machine)
+
 ```
-./run-benchmarks.sh
+git clone https://github.com/phantomSPH/phantom-benchmarks
+cd phantom-benchmarks
+PHANTOM_DIR=~/phantom ./phantombench
 ```
 
-## Run selected benchmarks
+This builds Phantom with `SYSTEM=gfortran`, downloads the initial conditions and runs the quick benchmarks. It uses one openMP thread per performance core. It then prints a summary and writes `runs/reports/<machine>/report.html`. Nothing is uploaded.
+
+Requirements: what Phantom itself needs to build (a Fortran compiler and make), plus bash, curl, shasum and python3 (version 3.6 or later, standard library only). matplotlib is optional and only used to draw the scaling figures.
+
+Layout:
+
 ```
-./run-benchmarks.sh polar
+phantombench              the command to run everything
+benchmarks/<name>/        inputs for each benchmark (no run output is written here)
+scripts/                  run-benchmarks.sh, scaling.sh, evcheck.py, report.py, machine.sh
+results/<machine>/*.csv   results, one line per run (committed to the repository)
+runs/                     where the calculations are run, plus reports (not committed)
 ```
-where arguments are subdirectories of the current one
+
+Commands:
+
+| command | does |
+|---|---|
+| `phantombench [run] [bench...]` | runs the benchmarks (default: quick tier) and reports |
+| `phantombench scaling [bench...]` | strong scaling over 1, 2, 4, ... threads up to the number of cores, then writes scaling tables and figures |
+| `phantombench compilers [bench...]` | runs once per compiler in `PHANTOMBENCH_SYSTEMS`, e.g. `PHANTOMBENCH_SYSTEMS="gfortran flang nvfortran"` |
+| `phantombench compare BASE HEAD` | compares two labelled builds, e.g. master vs a branch (see below) |
+| `phantombench report [--scaling] [--su ...]` | regenerates reports from stored results |
+| `phantombench qscript [bench...]` | writes a batch job script (via Phantom's `make qscript`) for a scaling test on an exclusive cluster node |
+| `phantombench reference [bench...]` | regenerates the reference data for a benchmark (maintainers) |
+| `phantombench status` | writes an html summary of the latest results (used by `phantom/scripts/nightly.sh`) |
+| `phantombench site [dir]` | builds the website from all results |
+
+Settings are environment variables:
+
+| variable | default | meaning |
+|---|---|---|
+| `PHANTOM_DIR` | `~/phantom` | Phantom source directory |
+| `SYSTEM` | `gfortran` | Phantom `SYSTEM`, i.e. compiler (`gfortran`, `ifx`, `flang`, `aocc`, `nvfortran`, `nt`, ...) |
+| `OMP_NUM_THREADS` | performance cores | number of openMP threads |
+| `PHANTOMBENCH_LABEL` | `$SYSTEM` | label for this build in the results, e.g. `gfortran-native` |
+| `PHANTOMBENCH_MAKEFLAGS` | | extra make variables, e.g. `"FFLAGS=-O3 -march=native"` |
+| `PHANTOMBENCH_TIER` | `quick` | `quick`, `full` or `all` |
+| `PHANTOMBENCH_THREADS` | 1 2 4 ... ncores | thread counts for scaling tests |
+| `PHANTOMBENCH_MACHINE` | hostname | machine name used for the results directory |
+| `PHANTOMBENCH_DATA` | `~/.cache/phantombench` | cache for downloaded dump files |
+| `PHANTOMBENCH_RUNDIR` | `runs/` | where the calculations are run |
+
+## Benchmarks
+
+| benchmark | tier | setup | particles | description |
+|---|---|---|---|---|
+| `sedov` | quick | sedov, global timesteps | 1.7e5 | Sedov blast wave, generated with phantomsetup |
+| `discbinary` | quick | disc | 5e5 | disc around one star of a binary (Franchini) |
+| `hh48` | quick | disc | 1e6 | two discs in the HH48 binary |
+| `commonenv` | quick | star, global timesteps | 8e5 | common envelope with self-gravity and two sinks (Kayla) |
+| `polar` | quick | disc | 1e6 | polar disc around a binary |
+| `grtde10m` | full | grtde | 1e7 | tidal disruption event in general relativity (Fitz) |
+
+## Correctness checks
+
+A benchmark passes if the run completes and its conservation properties are no worse than before. Results that differ from a reference dump are not failed, since a change may make the answer more accurate. The `.ev` file is checked by [evcheck.py](scripts/evcheck.py) against the `CONSERVE` file in each benchmark directory. That file lists each conserved quantity in one of two modes:
+
+- `exact`: must be conserved to round-off, e.g. linear and angular momentum with global timesteps (the treecode conserves both exactly), or the centre of mass after removing uniform motion. The tolerance is `C` times machine epsilon, with a default `C` of 100, or the precision of the `.ev` file if that is larger.
+- `ref`: conserved only to truncation error, e.g. energy, or momentum with individual timesteps. The error must be no more than 1.5 times that in the reference run (`conservation.ref`). A run that conserves noticeably better is reported as `improved`.
+
+The RMS difference from the reference dump (`diffdumps`) and the number of steps are also reported, so you can see if a speedup comes from taking fewer steps.
+
+## Comparing a branch against master
+
+```
+PHANTOM_DIR=~/phantom-master PHANTOMBENCH_LABEL=master ./phantombench run
+PHANTOM_DIR=~/phantom        PHANTOMBENCH_LABEL=mybranch ./phantombench run
+./phantombench compare master mybranch
+```
+
+On Phantom pull requests this happens automatically on a self-hosted runner if you tick "Run benchmarks" in the PR description, or a maintainer adds the `benchmark` label. See `.github/workflows/benchmark.yml` in Phantom.
+
+## Scaling tests for computing time applications
+
+```
+./phantombench scaling hh48
+./phantombench report --scaling hh48 --su 2e6:5e4:48:20
+```
+
+This writes the following to `runs/reports/<machine>/`:
+
+- a wall time / speedup / efficiency table, in markdown and in `scaling-hh48.tex` (a LaTeX table plus a paragraph ready to paste into an application);
+- `scaling-hh48.pdf` / `.png` (log-log wall time against cpus, with ideal scaling);
+- with `--su NPART:NSTEPS:NCORES:NRUNS`, an estimate of the service units for a production campaign.
+
+On a cluster, write a job script with Phantom's `make qscript`. Each SYSTEM has its own queue settings, and the script requests an exclusive node:
+
+```
+SYSTEM=nt PHANTOMBENCH_MACHINE=ozstar-milan PHANTOMBENCH_QMODULES="gcc/13.3.0" \
+   ./phantombench qscript hh48 commonenv > bench.q
+sbatch bench.q
+```
+
+Then commit `results/ozstar-milan/*.csv` to add the results to the website.
 
 ## How to add benchmark problems to this suite
 
@@ -24,39 +123,47 @@ git clone https://github.com/phantomSPH/phantom-benchmarks
 2. Make a new directory
 ```
 cd phantom-benchmarks
-mkdir mybench
-cd mybench
+mkdir benchmarks/mybench
+cd benchmarks/mybench
 ```
 
-3. Add the phantom input file with ".in.s" as the file extension
+3. Add the phantom input file with ".in.s" as the file extension, and the dump file it starts from (or a `mybench.setup` file, in which case the initial conditions are generated with phantomsetup)
 ```
 cp mybench.in mybench.in.s
+cp mybench_00000 .
 ```
 
-4. Add the reference dump file to which results should be compared, with ".ref" as the file extension
+4. Add a file named `SETUP` containing the phantom SETUP (optionally followed by make variables, e.g. `sedov IND_TIMESTEPS=no`), a file named `TIER` containing `quick` or `full`, and a file named `CONSERVE` listing the conserved quantities to check (see "Correctness checks" above)
 ```
-cp mybench_00001 mybench_00001.ref
+echo disc > SETUP
+echo quick > TIER
+printf "totmom ref\nangtot ref\n" > CONSERVE
 ```
 
 5. Ensure your calculation is SHORT (runs in < 2 minutes) but REPRESENTATIVE, e.g. with typical particle numbers and timestep ranges
 
-6. Verify that the test passes by running
+6. Generate the reference data to which results should be compared. This runs the benchmark, writes `conservation.ref`, keeps the output dump as the reference dump with ".ref" as the file extension (stored in `~/.cache/phantombench/mybench/`), and writes the `.hashlist` file
 ```
-./run-benchmarks mybench
-```
-
-
-7. Open an Issue to make a request for the dump files to be copied to the web server (http://data.phantom.cloud.edu.au/data/benchmarks/)
-
-8. Create a file named `.hashlist`, which points to the files that need to be automatically downloaded at run time. Generate the SHA1 checksums for your files using `shasum` (or `sha1sum`, depending on your system). For example, `shasum mybench_00000`. Your file should look like this:
-```
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00001.ref
+cd ../..
+./phantombench reference mybench
 ```
 
-9. Commit and push the benchmark to the repository, excluding the dump files (to avoid bloating the repository)
+7. Verify that the test passes by running
 ```
-git add mybench.in.s SETUP .hashlist
+./phantombench run mybench
+```
+
+8. Open an Issue to make a request for the dump files to be uploaded to the [data-v1 release](https://github.com/phantomSPH/phantom-benchmarks/releases/tag/data-v1) (and the Zenodo mirror), named `mybench.<file>`, e.g. `mybench.mybench_00000`
+
+9. Check the file named `.hashlist`, which points to the files that need to be automatically downloaded at run time. Each line gives the SHA256 checksum (from `shasum -a 256`), the file name and the URL to download it from. Your file should look like this:
+```
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000 https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/mybench.mybench_00000
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00001.ref https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/mybench.mybench_00001.ref
+```
+
+10. Commit and push the benchmark to the repository, excluding the dump files (to avoid bloating the repository)
+```
+git add benchmarks/mybench/mybench.in.s benchmarks/mybench/SETUP benchmarks/mybench/TIER benchmarks/mybench/CONSERVE benchmarks/mybench/conservation.ref benchmarks/mybench/.hashlist
 git commit -m 'added benchmark mybench'
 git push
 ```

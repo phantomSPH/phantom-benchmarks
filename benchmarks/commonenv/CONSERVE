@@ -1,0 +1,12 @@
+# quantity  mode  [C, floor in units of machine epsilon]
+# common envelope: adiabatic, self-gravity + 2 sinks, global timesteps
+# the treecode conserves linear and angular momentum exactly, so these are enforced to round-off.
+# The centre of mass moves uniformly (snapshot has non-zero momentum) and is checked after removing
+# that motion; round-off in summing m*x over 8e5 particles with ejecta at large radius is
+# ~eps*sqrt(N)*R_max ~ 1e-10, hence the larger C. A secular drift would exceed this quickly.
+etot   ref
+totmom exact
+angtot exact
+xcom   exact 5e6
+ycom   exact 5e6
+zcom   exact 5e6

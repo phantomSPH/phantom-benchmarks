@@ -1,0 +1,8 @@
+# quantity  mode  [C, floor in units of machine epsilon]
+# locally isothermal disc around a binary with individual timesteps:
+# energy is not conserved; momentum and angular momentum only to timestepping error
+totmom ref
+angtot ref
+xcom   ref
+ycom   ref
+zcom   ref

@@ -1,0 +1,4 @@
+# 10M particle tidal disruption event in general relativity (Kerr metric), individual timesteps
+# momentum is not conserved in an external metric; compare energy and angular momentum to reference
+etot   ref
+angtot ref
