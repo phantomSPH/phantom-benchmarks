@@ -150,8 +150,8 @@ jobs:
       - name: append results and commit
         run: |
           # append new rows, keeping the header only if the file is new
-          for csv in new/*/$PHANTOMBENCH_MACHINE/*.csv; do
-             [ -e "$csv" ] || continue
+          # (artifacts may or may not keep the machine subdirectory, so search for them)
+          for csv in $(find new -name '*.csv'); do
              out=results/$PHANTOMBENCH_MACHINE/$(basename $csv)
              mkdir -p $(dirname $out)
              if [ -e $out ]; then tail -n +2 $csv >> $out; else cp $csv $out; fi
