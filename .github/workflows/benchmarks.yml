@@ -1,0 +1,176 @@
+name: benchmarks
+
+# Runs the benchmark suite on GitHub-hosted runners, one job per benchmark, with each job
+# building and running every compiler in turn on the same machine. Results are committed to
+# results/github-ubuntu/ and the website is rebuilt.
+#
+# Hosted runners are shared virtual machines (4 cores, variable cpu model), so these results
+# check correctness and compare compilers, but are not precise timings.
+#
+# Triggered manually, or by phantom (danieljprice/phantom) on every push to main via a
+# repository_dispatch event of type "phantom-push" with client_payload.sha
+
+on:
+  workflow_dispatch:
+    inputs:
+      phantom_ref:
+        description: 'phantom branch, tag or commit to benchmark'
+        default: 'main'
+      systems:
+        description: 'phantom SYSTEMs (compilers) to test'
+        default: 'gfortran ifx aocc nvfortran'
+      benchmarks:
+        description: 'benchmarks to run (blank = all in tier)'
+        default: ''
+      tier:
+        description: 'tier of benchmarks to run'
+        type: choice
+        options: [ quick, all ]
+        default: quick
+  repository_dispatch:
+    types: [ phantom-push ]
+
+# one run at a time; a burst of pushes to phantom collapses into a single queued run
+concurrency:
+  group: benchmarks
+  cancel-in-progress: false
+
+env:
+  PHANTOM_REF: ${{ github.event.client_payload.sha || inputs.phantom_ref || 'main' }}
+  SYSTEMS: ${{ inputs.systems || 'gfortran ifx aocc nvfortran' }}
+  PHANTOMBENCH_MACHINE: github-ubuntu
+
+jobs:
+
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      benchmarks: ${{ steps.list.outputs.benchmarks }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        env:
+          BENCHMARKS: ${{ inputs.benchmarks }}
+          TIER: ${{ inputs.tier || 'quick' }}
+        run: |
+          # benchmarks requested, or all those in the requested tier
+          if [ -z "$BENCHMARKS" ]; then
+             for dir in benchmarks/*/; do
+                name=$(basename $dir)
+                if [ "$TIER" == "all" ] || [ "$(cat $dir/TIER)" == "$TIER" ]; then BENCHMARKS+=" $name"; fi
+             done
+          fi
+          echo "benchmarks=$(echo $BENCHMARKS | jq -cR 'split(" ")')" >> $GITHUB_OUTPUT
+
+  bench:
+    needs: list
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: ${{ fromJson(needs.list.outputs.benchmarks) }}
+    name: ${{ matrix.bench }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: checkout phantom
+        uses: actions/checkout@v7
+        with:
+          repository: danieljprice/phantom
+          ref: ${{ env.PHANTOM_REF }}
+          path: phantom
+
+      - name: free disk space for compilers
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+
+      # gfortran is already installed on the runner; same compiler mapping as phantom's build.yml
+      - name: install ifx
+        if: contains(env.SYSTEMS, 'ifx')
+        uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: intel
+      - name: install aocc
+        if: contains(env.SYSTEMS, 'aocc')
+        uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: aocc
+      - name: install nvfortran
+        if: contains(env.SYSTEMS, 'nvfortran')
+        uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: nvidia-hpc
+
+      - name: cache benchmark data
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/phantombench/${{ matrix.bench }}
+          key: phantombench-${{ matrix.bench }}-${{ hashFiles(format('benchmarks/{0}/.hashlist', matrix.bench)) }}
+
+      - name: run benchmark with each compiler
+        run: |
+          PHANTOMBENCH_SYSTEMS="$SYSTEMS" PHANTOMBENCH_RESULTS=$RUNNER_TEMP/results \
+          OMP_NUM_THREADS=$(nproc) PHANTOM_DIR=$PWD/phantom \
+          ./phantombench compilers ${{ matrix.bench }} | tee report.txt
+          sed -n '/^|/p' report.txt >> $GITHUB_STEP_SUMMARY
+          # fail the job if any compiler failed to build, run or conserve
+          if grep -qE '^\*\*\*|\| fail \|' report.txt; then exit 1; fi
+
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: results-${{ matrix.bench }}
+          path: ${{ runner.temp }}/results
+          if-no-files-found: ignore
+
+      - name: upload logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-${{ matrix.bench }}
+          path: |
+            runs/${{ matrix.bench }}/*.log
+            runs/${{ matrix.bench }}/build-*/make-*.log
+
+  commit:
+    needs: bench
+    if: always() && needs.bench.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: results-*
+          path: new
+
+      - name: append results and commit
+        run: |
+          # append new rows, keeping the header only if the file is new
+          for csv in new/*/$PHANTOMBENCH_MACHINE/*.csv; do
+             [ -e "$csv" ] || continue
+             out=results/$PHANTOMBENCH_MACHINE/$(basename $csv)
+             mkdir -p $(dirname $out)
+             if [ -e $out ]; then tail -n +2 $csv >> $out; else cp $csv $out; fi
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results
+          git diff --cached --quiet && { echo "no new results"; exit 0; }
+          git commit -m "results: GitHub Actions run ${{ github.run_id }} (phantom $PHANTOM_REF)"
+          for attempt in 1 2 3; do
+             git push && exit 0
+             git pull --rebase
+          done
+          exit 1
+
+  pages:
+    needs: commit
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

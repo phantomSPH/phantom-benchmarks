@@ -90,6 +90,13 @@ PHANTOM_DIR=~/phantom        PHANTOMBENCH_LABEL=mybranch ./phantombench run
 
 On Phantom pull requests this happens automatically on a self-hosted runner if you tick "Run benchmarks" in the PR description, or a maintainer adds the `benchmark` label. See `.github/workflows/benchmark.yml` in Phantom.
 
+## Benchmarks on GitHub Actions
+
+The [benchmarks workflow](.github/workflows/benchmarks.yml) runs the quick benchmarks on GitHub-hosted runners after every push to Phantom's main branch. It runs one job per benchmark, and each job builds and runs every compiler (gfortran, ifx, aocc and nvfortran) in turn on the same machine. Results are committed to `results/github-ubuntu/` and the website is updated. These are shared virtual machines with 4 cores and varying cpus, so the results check correctness and compare compilers, but are not precise timings. To run it by hand, e.g. on a branch:
+```
+gh workflow run benchmarks -R phantomSPH/phantom-benchmarks -f phantom_ref=mybranch -f systems="gfortran ifx"
+```
+
 ## Scaling tests for computing time applications
 
 ```
