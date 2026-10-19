@@ -71,6 +71,13 @@ jobs:
     name: ${{ matrix.bench }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      PHANTOM_DIR: ${{ github.workspace }}/phantom
+      PHANTOMBENCH_RESULTS: ${{ github.workspace }}/new-results
+      OMP_NUM_THREADS: 4
+      OMP_STACKSIZE: 1024m
+      OMP_SCHEDULE: dynamic
+      RETURN_ERR: 'yes'
     steps:
       - uses: actions/checkout@v7
 
@@ -84,44 +91,59 @@ jobs:
       - name: free disk space for compilers
         run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
 
-      # gfortran is already installed on the runner; same compiler mapping as phantom's build.yml
-      - name: install ifx
-        if: contains(env.SYSTEMS, 'ifx')
-        uses: fortran-lang/setup-fortran@v1
-        with:
-          compiler: intel
-      - name: install aocc
-        if: contains(env.SYSTEMS, 'aocc')
-        uses: fortran-lang/setup-fortran@v1
-        with:
-          compiler: aocc
-      - name: install nvfortran
-        if: contains(env.SYSTEMS, 'nvfortran')
-        uses: fortran-lang/setup-fortran@v1
-        with:
-          compiler: nvidia-hpc
-
       - name: cache benchmark data
         uses: actions/cache@v6
         with:
           path: ~/.cache/phantombench/${{ matrix.bench }}
           key: phantombench-${{ matrix.bench }}-${{ hashFiles(format('benchmarks/{0}/.hashlist', matrix.bench)) }}
 
-      - name: run benchmark with each compiler
+      # one step per compiler, each installed just before it is used, since installing a
+      # compiler can change the environment (e.g. LIBRARY_PATH) seen by those installed before it.
+      # gfortran is already on the runner; same compiler mapping as phantom's build.yml.
+      # Later compilers run even if an earlier one fails (!cancelled)
+      - name: gfortran
+        if: ${{ !cancelled() && contains(env.SYSTEMS, 'gfortran') }}
+        run: SYSTEM=gfortran PHANTOMBENCH_LABEL=gfortran ./scripts/run-benchmarks.sh ${{ matrix.bench }}
+
+      - name: install ifx
+        if: ${{ !cancelled() && contains(env.SYSTEMS, 'ifx') }}
+        uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: intel
+      - name: ifx
+        if: ${{ !cancelled() && contains(env.SYSTEMS, 'ifx') }}
+        run: SYSTEM=ifx PHANTOMBENCH_LABEL=ifx ./scripts/run-benchmarks.sh ${{ matrix.bench }}
+
+      - name: install aocc
+        if: ${{ !cancelled() && contains(env.SYSTEMS, 'aocc') }}
+        uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: aocc
+      - name: aocc
+        if: ${{ !cancelled() && contains(env.SYSTEMS, 'aocc') }}
+        run: SYSTEM=aocc PHANTOMBENCH_LABEL=aocc ./scripts/run-benchmarks.sh ${{ matrix.bench }}
+
+      - name: install nvfortran
+        if: ${{ !cancelled() && contains(env.SYSTEMS, 'nvfortran') }}
+        uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: nvidia-hpc
+      - name: nvfortran
+        if: ${{ !cancelled() && contains(env.SYSTEMS, 'nvfortran') }}
+        run: SYSTEM=nvfortran PHANTOMBENCH_LABEL=nvfortran ./scripts/run-benchmarks.sh ${{ matrix.bench }}
+
+      - name: summary
+        if: ${{ !cancelled() }}
         run: |
-          PHANTOMBENCH_SYSTEMS="$SYSTEMS" PHANTOMBENCH_RESULTS=$RUNNER_TEMP/results \
-          OMP_NUM_THREADS=$(nproc) PHANTOM_DIR=$PWD/phantom \
-          ./phantombench compilers ${{ matrix.bench }} | tee report.txt
-          sed -n '/^|/p' report.txt >> $GITHUB_STEP_SUMMARY
-          # fail the job if any compiler failed to build, run or conserve
-          if grep -qE '^\*\*\*|\| fail \|' report.txt; then exit 1; fi
+          python3 scripts/report.py --results $PHANTOMBENCH_RESULTS --reports $RUNNER_TEMP/reports \
+             --machine $PHANTOMBENCH_MACHINE ${{ matrix.bench }} | sed -n '/^|/p' | tee -a $GITHUB_STEP_SUMMARY
 
       - name: upload results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: results-${{ matrix.bench }}
-          path: ${{ runner.temp }}/results
+          path: ${{ env.PHANTOMBENCH_RESULTS }}
           if-no-files-found: ignore
 
       - name: upload logs
@@ -154,7 +176,12 @@ jobs:
           for csv in $(find new -name '*.csv'); do
              out=results/$PHANTOMBENCH_MACHINE/$(basename $csv)
              mkdir -p $(dirname $out)
-             if [ -e $out ]; then tail -n +2 $csv >> $out; else cp $csv $out; fi
+             if [ -e $out ]; then
+                # use the new header if columns have been added since the file was written
+                (head -1 $csv; tail -n +2 $out; tail -n +2 $csv) > $out.tmp && mv $out.tmp $out
+             else
+                cp $csv $out
+             fi
           done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

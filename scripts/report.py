@@ -102,11 +102,18 @@ def summary(rows):
     """table of the latest result for each benchmark, build and thread count"""
     last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads']))
     header = ['benchmark', 'build', 'threads', 'npart', 'steps', 'wall (s)', 'change',
-              'status', 'phantom', 'date']
+              'Mpart/s', 'cpu (s)', 'cpu/wall', 'status', 'phantom', 'date']
     body = [[r['bench'], r['label'], r['nthreads'], r['npart'], r['nsteps'], r['wall'],
-             pct(fnum(r['wall']), previous_wall(rows, r)), r['status'], r['phantom_sha'],
+             pct(fnum(r['wall']), previous_wall(rows, r)), r.get('mpart_per_s') or '',
+             r.get('cpu_time') or '', cpu_per_wall(r), r['status'], r['phantom_sha'],
              r['date'][:10]] for r in last.values()]
     return header, body
+
+
+def cpu_per_wall(row):
+    """ratio of cpu to wall time, which is below the number of threads if cpus are shared"""
+    cpu, wall = fnum(row.get('cpu_time')), fnum(row['wall'])
+    return f'{cpu / wall:.1f}' if cpu and wall else ''
 
 
 def scaling_data(rows, bench):
@@ -254,7 +261,7 @@ def compare(rows, base, head):
     """markdown comparison between two labelled builds, e.g. master vs a pull request"""
     last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads']))
     header = ['benchmark', 'threads', f'{base} (s)', f'{head} (s)', 'change',
-              'steps', 'conservation']
+              'steps', 'cpu/wall', 'conservation']
     body = []
     for (bench, label, n), h in last.items():
         b = last.get((bench, base, n))
@@ -264,7 +271,8 @@ def compare(rows, base, head):
         slow = fnum(change.rstrip('%')) or 0.
         flag = ' :red_circle:' if slow > 10. else (' :orange_circle:' if slow > 5. else '')
         body.append([bench, n, b['wall'], h['wall'], change + flag,
-                     f"{b['nsteps']} → {h['nsteps']}", f"{b['status']} → {h['status']}"])
+                     f"{b['nsteps']} → {h['nsteps']}", f"{cpu_per_wall(b)} → {cpu_per_wall(h)}",
+                     f"{b['status']} → {h['status']}"])
     return header, body
 
 

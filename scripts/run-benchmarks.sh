@@ -72,7 +72,7 @@ codelog="code-$label-$nthreads.log";
 timelog="time-$label-$nthreads.log";
 evlog="ev-$label-$nthreads.log";
 makelog="make-$label.log";
-csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags"
+csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s"
 phantom_sha=`git -C $phantomdir rev-parse --short HEAD`;
 phantom_branch=`git -C $phantomdir rev-parse --abbrev-ref HEAD`;
 if [ -n "$(git -C $phantomdir status --porcelain -uno)" ]; then phantom_sha+="-dirty"; fi
@@ -146,7 +146,7 @@ run_benchmark()
 {
    name=$1;
    src=$srcdir/$name;
-   echo "Checking ${name} benchmark..."
+   start_group "${name} benchmark with $label, $nthreads threads"
    mkdir -p $rundir/$name; cd $rundir/$name;
    rm -f $difflog $codelog $timelog $evlog;
    msg=`check_benchmark_dir`
@@ -302,19 +302,37 @@ get_timer()
 write_csv()
 {
   csvfile=$resultsdir/$machine/$name.csv;
-  npart=`./$builddir/showheader ${dumpout} 2> /dev/null | grep -m1 -i 'nparttot' | awk '{print $NF}'`;
   fflags=`grep -m1 'Fortran flags are' $builddir/$makelog | sed 's/.*flags are //' | tr ',' ' '`;
   ind=`grep -m1 'IND TIMESTEPS efficiency' $codelog | sed 's/.*efficiency[: =]*//; s/%.*//'`;
   cons=`grep RESULT $evlog 2> /dev/null | awk '{print $3}' | tr ',' ';'`;
   mkdir -p $resultsdir/$machine;
   if [ ! -e $csvfile ]; then echo "$csvheader" > $csvfile; fi
-  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags" >> $csvfile;
+  # update the header of files written before columns were added
+  if [ "`head -1 $csvfile`" != "$csvheader" ]; then
+     (echo "$csvheader"; tail -n +2 $csvfile) > $csvfile.tmp && mv $csvfile.tmp $csvfile;
+  fi
+  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart" >> $csvfile;
 }
 log_failure()
 {
   nfail=$(( nfail + 1 ));
   status="fail";
-  echo "*** $1 ***";
+  end_group error "*** $1 ***";
+}
+#
+# when running in GitHub Actions, collapse the output of each run and highlight the result
+#
+start_group()
+{
+  if [ "$GITHUB_ACTIONS" == "true" ]; then echo "::group::$1"; else echo "$1"; fi
+}
+end_group()
+{
+  if [ "$GITHUB_ACTIONS" == "true" ]; then
+     echo "::endgroup::"; echo "::$1 title=$name ($label, $nthreads threads)::$2";
+  else
+     echo "$2";
+  fi
 }
 #
 # check whether the run completed and conserved as well as the reference run
@@ -323,7 +341,15 @@ parse_results()
 {
   # wall time measured externally, independent of the clock used by the code
   wall=`head -1 $timelog | awk '{print $2}'`;
+  cputime=`awk '$1=="user" || $1=="sys" {t+=$2} END {printf "%.2f", t}' $timelog`;
   nsteps=`grep 'Since code start' $codelog | tail -1 | awk '{print $4}'`;
+  npart=`./$builddir/showheader ${dumpout} 2> /dev/null | grep -m1 -i 'nparttot' | awk '{print $NF}'`;
+  # millions of particle updates per second: as printed by phantom with individual timesteps,
+  # otherwise every particle is updated on every step
+  mpart=`grep 'M particles per second' $codelog | tail -1 | sed 's/M particles.*//' | tr -d ' '`;
+  if [ -z "$mpart" ] && [ -n "$npart" ] && [ -n "$nsteps" ]; then
+     mpart=`awk -v n=$npart -v s=$nsteps -v w=$wall 'BEGIN { if (w > 0) printf "%.3f", 1e-6*n*s/w }'`;
+  fi
   rmserr=`grep 'RMS ERROR' $difflog 2> /dev/null | cut -d':' -f 2 | tr -d ' '`;
   rmserr=${rmserr:-N/A};
   status=`grep RESULT $evlog 2> /dev/null | awk '{print $2}'`;
@@ -335,7 +361,8 @@ parse_results()
   elif [ "$status" != "pass" ] && [ "$status" != "improved" ]; then
      log_failure "conservation worse than reference (see $rundir/$name/$evlog)";
   else
-     echo "TIME: ${wall}s NSTEPS: $nsteps CONSERVATION: $status";
+     cpuwall=`awk -v c=$cputime -v w=$wall 'BEGIN { if (w > 0) printf "%.1f", c/w }'`;
+     end_group notice "TIME: ${wall}s CPU/WALL: $cpuwall MPART/S: $mpart NSTEPS: $nsteps CONSERVATION: $status";
   fi
   write_csv;
 }
