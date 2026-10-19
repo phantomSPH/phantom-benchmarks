@@ -76,7 +76,7 @@ Settings are environment variables:
 A benchmark passes if the run completes and its conservation properties are no worse than before. Results that differ from a reference dump are not failed, since a change may make the answer more accurate. The `.ev` file is checked by [evcheck.py](scripts/evcheck.py) against the `CONSERVE` file in each benchmark directory. That file lists each conserved quantity in one of two modes:
 
 - `exact`: must be conserved to round-off, e.g. linear and angular momentum with global timesteps (the treecode conserves both exactly), or the centre of mass after removing uniform motion. The tolerance is `C` times machine epsilon, with a default `C` of 100, or the precision of the `.ev` file if that is larger.
-- `ref`: conserved only to truncation error, e.g. energy, or momentum with individual timesteps. The error must be no more than 1.5 times that in the reference run (`conservation.ref`). A run that conserves noticeably better is reported as `improved`.
+- `ref`: conserved only to truncation error, e.g. energy, or momentum with individual timesteps. The error must be no more than 1.1 times that in the reference run (`conservation.ref`); these errors agree to three digits between compilers and thread counts, so any change is significant. A run that conserves at least 10% better is reported as `improved`.
 
 The RMS difference from the reference dump (`diffdumps`) and the number of steps are also reported, so you can see if a speedup comes from taking fewer steps.
 

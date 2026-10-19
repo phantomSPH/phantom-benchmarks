@@ -196,6 +196,8 @@ jobs:
 
   pages:
     needs: commit
+    # update the site whenever results were committed, even if some benchmarks failed
+    if: always() && needs.commit.result == 'success'
     permissions:
       contents: read
       pages: write

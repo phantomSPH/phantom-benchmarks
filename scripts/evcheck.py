@@ -11,7 +11,7 @@ CONSERVE lists the quantities that should be conserved, one per line:
   ref   : conserved only to truncation error; must be no worse than
           factor*(error in reference run), stored in conservation.ref
   C     : multiplier on machine epsilon for the round-off floor (default 100)
-An optional line "factor <value>" sets the allowed degradation (default 1.5).
+An optional line "factor <value>" sets the allowed degradation (default 1.1).
 
 The error in quantity Q is max_t |Q(t) - Q(0)| (for the centre of mass, after
 removing uniform motion), normalised by |Q(0)| when
@@ -77,7 +77,7 @@ def check(evfile, conservefile, reffile=None, update_ref=False):
     ev = read_ev(evfile)
     have_ref = reffile and os.path.exists(reffile) and not update_ref
     ref = {k: float(v) for k, v in read_pairs(reffile)} if have_ref else {}
-    factor = 1.5
+    factor = 1.1
     status = 'pass'
     errs = {}
     for tokens in read_pairs(conservefile):
