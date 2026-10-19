@@ -1,0 +1,8 @@
+# quantity  mode  [C, floor in units of machine epsilon]
+# periodic box with global timestepping: linear momentum and centre of mass
+# are conserved to round-off; round-off in summing over 1.7e5 particles is ~1e-13
+etot   ref
+totmom exact 1000
+xcom   exact 1000
+ycom   exact 1000
+zcom   exact 1000

@@ -1,11 +1,4 @@
-*.html
-Makefile
-*.prev
-*.log
-*.ev
-*.in
-*.txt
-*.js
-diffdumps
-phantom*
-stats.txt
+# run products, reports and the generated website
+runs/
+site/
+__pycache__/
