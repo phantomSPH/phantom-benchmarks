@@ -3,8 +3,8 @@
 # This file is updated automatically after a full dump
 
 # job name
-             logfile =  disc01.log    ! file to which output is directed
-            dumpfile =  disc_00000    ! dump file to start from
+             logfile =  discbinary01.log    ! file to which output is directed
+            dumpfile =  discbinary_00000    ! dump file to start from
 
 # options controlling run time and input/output
                 tmax =  0.0628318531  ! end time

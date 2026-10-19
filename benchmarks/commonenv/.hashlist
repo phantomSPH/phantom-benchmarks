@@ -1,2 +1,2 @@
-eb48c29f91a261bb96d94b482c04a0f270bdca3c1ea9c1322f7dbafd8544fa7e binary_20000 https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/commonenv.binary_20000
-d8b7e2334394754625a3ccf94377e30e465f3f108d55c0ef295f19b27c24aa33 binary_20001.ref https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/commonenv.binary_20001.ref
+eb48c29f91a261bb96d94b482c04a0f270bdca3c1ea9c1322f7dbafd8544fa7e commonenv_20000 https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/commonenv_20000
+d8b7e2334394754625a3ccf94377e30e465f3f108d55c0ef295f19b27c24aa33 commonenv_20001.ref https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/commonenv_20001.ref

@@ -127,7 +127,7 @@ mkdir benchmarks/mybench
 cd benchmarks/mybench
 ```
 
-3. Add the phantom input file with ".in.s" as the file extension, and the dump file it starts from (or a `mybench.setup` file, in which case the initial conditions are generated with phantomsetup)
+3. Add the phantom input file, named after the benchmark with ".in.s" as the file extension, and the dump file it starts from (or a `mybench.setup` file, in which case the initial conditions are generated with phantomsetup). The dump files must also be named after the benchmark, e.g. `mybench_00000`, with `logfile = mybench01.log` and `dumpfile = mybench_00000` in the input file
 ```
 cp mybench.in mybench.in.s
 cp mybench_00000 .
@@ -153,12 +153,12 @@ cd ../..
 ./phantombench run mybench
 ```
 
-8. Open an Issue to make a request for the dump files to be uploaded to the [data-v1 release](https://github.com/phantomSPH/phantom-benchmarks/releases/tag/data-v1) (and the Zenodo mirror), named `mybench.<file>`, e.g. `mybench.mybench_00000`
+8. Open an Issue to make a request for the dump files to be uploaded to the [data-v1 release](https://github.com/phantomSPH/phantom-benchmarks/releases/tag/data-v1) (and the Zenodo mirror), keeping the same file names, e.g. `mybench_00000`
 
 9. Check the file named `.hashlist`, which points to the files that need to be automatically downloaded at run time. Each line gives the SHA256 checksum (from `shasum -a 256`), the file name and the URL to download it from. Your file should look like this:
 ```
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000 https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/mybench.mybench_00000
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00001.ref https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/mybench.mybench_00001.ref
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00000 https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/mybench_00000
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx mybench_00001.ref https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1/mybench_00001.ref
 ```
 
 10. Commit and push the benchmark to the repository, excluding the dump files (to avoid bloating the repository)

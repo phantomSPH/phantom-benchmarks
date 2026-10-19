@@ -1,45 +1,48 @@
-# Runtime options file for Phantom, written 19/10/2026 18:30:23.5
+# Runtime options file for Phantom, written 06/11/2025 09:57:34.7
 # Options not present assume their default values
 # This file is updated automatically after a full dump
 
 # job name
-             logfile =   opt01.log    ! file to which output is directed
-            dumpfile =   opt_21240    ! dump file to start from
+             logfile =  commonenv01.log   ! file to which output is directed
+            dumpfile =  commonenv_20000   ! dump file to start from
 
 # options controlling run time and input/output
-                tmax =   6.402E+06    ! end time
-               dtmax =   10.003125    ! time between dumps
+                tmax =   2.000E+06    ! end time
+               dtmax =         16.    ! time between dumps
                 nmax =          -1    ! maximum number of timesteps (0=just get derivs and stop)
-           nmaxdumps =           1    ! stop after n full dumps (-ve=ignore)
                 nout =          -1    ! write dumpfile every n dtmax (-ve=ignore)
+           nmaxdumps =           1    ! stop after n full dumps (-ve=ignore)
             twallmax =      000:00    ! maximum wall time (hhh:mm, 000:00=ignore)
+           dtwallmax =      024:00    ! maximum wall time between dumps (hhh:mm, 000:00=ignore)
            nfulldump =           1    ! full dump every n dumps
             iverbose =           0    ! verboseness of log (-1=quiet 0=default 1=allsteps 2=debug 5=max)
 
 # options controlling accuracy
-              C_cour =       0.300    ! Courant factor
-             C_force =       0.250    ! dt_force factor
+              C_cour =       0.300    ! Courant number
+             C_force =       0.250    ! dt_force number
                 tolv =   1.000E-02    ! tolerance on v iterations in timestepping
-                xtol =   1.000E-07    ! tolerance on xyz iterations
-                ptol =   1.000E-07    ! tolerance on pmom iterations
+               hfact =       1.200    ! h in units of particle spacing [h = hfact(m/rho)^(1/3)]
+                tolh =   1.000E-04    ! tolerance on h-rho iterations
        tree_accuracy =       0.500    ! tree opening criterion (0.0-1.0)
-               hfact =       1.200    ! h in units of particle spacing [h = hfact*n^(-1/3)]
-                tolh =   1.000E-04    ! tolerance on h-n iterations
 
-# shock capturing
-               alpha =       1.000    ! shock viscosity parameter
-                beta =       2.000    ! non-linear shock viscosity parameter
+# options controlling hydrodynamics, shock capturing
+               alpha =       0.000    ! MINIMUM shock viscosity parameter
+            alphamax =       1.000    ! MAXIMUM shock viscosity parameter
               alphau =       0.100    ! shock conductivity parameter
-            ireconav =          -1    ! use reconstruction in shock viscosity (-1=off,0=no limiter,1=Van Leer)
+                beta =       2.000    ! beta viscosity
+        avdecayconst =       0.100    ! decay time constant for viscosity switches
+
+# options controlling damping
+               idamp =           0    ! artificial damping of velocities (0=off, 1=constant, 2=star, 3=disc)
 
 # options controlling equation of state
-                ieos =          12    ! eqn of state (1=isoth;2=adiab;3=locally iso;8=barotropic)
-                  mu =      0.5988    ! mean molecular weight
+                ieos =           2    ! eqn of state (1=isoth;2=adiab;3=locally iso;8=barotropic)
+                  mu =  0.627697745  ! mean molecular weight
         ipdv_heating =           1    ! heating from PdV work (0=off, 1=on)
       ishock_heating =           1    ! shock heating (0=off, 1=on)
-            ien_type =           2    ! energy variable (0=auto,1=entropy,2=entropy_s)
 
 # options controlling cooling
+              C_cool =       0.050    ! factor controlling cooling timestep
             icooling =           0    ! cooling function (0=off, 1=library (step), 2=library (force),3=Gammie, 4=ISM, 5,6=KI02, 7=powerlaw, 9=radiative approx)
 
 # options controlling sink particles
@@ -48,9 +51,8 @@
      h_soft_sinksink =       0.000    ! softening length between sink particles
                f_acc =       0.800    ! particles < f_acc*h_acc accreted without checks
 
-# options relating to GR external forces
-          accradius1 =       6.000    ! soft accretion radius of black hole(s) (in units of M_bh)
-     accradius1_hard =       6.000    ! hard accretion radius of black hole (in units of M_bh)
+# options relating to external forces
+      iexternalforce =           0    ! 1=star,2=coro,3=bina,4=prdr,5=toru,6=toys,7=exte,8=spir,9=Lens,10=dens,11=Eins,
 
 # options controlling physical viscosity
            irealvisc =           0    ! physical viscosity type (0=none,1=const,2=Shakura/Sunyaev)
@@ -60,11 +62,5 @@
 # options for injecting/removing particles
                rkill =      -1.000    ! deactivate particles outside this radius (<0 is off)
 
-# options relating to the Kerr metric
-               mass1 =       1.000    ! black hole mass in code units
-                   a =       0.000    ! spin parameter for Kerr metric
-
-# optional outputs
-               curlv =           F    ! output curl v in dump files
-           track_lum =           F    ! write du/dt to dump files (for a "lightcurve")
+# gravitational waves
                   gw =           F    ! calculate gravitational wave strain
