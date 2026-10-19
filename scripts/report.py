@@ -241,10 +241,12 @@ def history_chart(rows, bench, subtitle):
             '      var data = new google.visualization.DataTable();\n'
             "      data.addColumn('date', 'Date');\n"
             f'{cols}\n      data.addRows([\n' + '\n'.join(datarows) + '\n      ]);\n'
-            f"      var options = {{ chart: {{ title: 'Benchmark timings for {bench} test', "
-            f"subtitle: '{subtitle}' }}, interpolateNulls: true, width: 900, height: 500 }};\n"
-            f"      var chart = new google.charts.Line(document.getElementById('{bench}'));\n"
-            '      chart.draw(data, google.charts.Line.convertOptions(options));\n'
+            # classic line chart, since it shows points, so series with a single run are visible
+            f"      var options = {{ title: 'Benchmark timings for {bench} test ({subtitle})', "
+            "vAxis: { title: 'wall time (s)', viewWindow: { min: 0 } }, pointSize: 5, interpolateNulls: true, "
+            "width: 900, height: 500 };\n"
+            f"      var chart = new google.visualization.LineChart(document.getElementById('{bench}'));\n"
+            '      chart.draw(data, options);\n'
             '    });\n</script>')
 
 
@@ -337,7 +339,7 @@ def page(title, body, home='../index.html'):
     return ('<html>\n<head>\n<meta charset="utf-8">\n'
             f'<title>{html.escape(title)}</title>\n'
             '<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>\n'
-            "<script type=\"text/javascript\">google.charts.load('current', {'packages':['line']});</script>\n"
+            "<script type=\"text/javascript\">google.charts.load('current', {'packages':['corechart']});</script>\n"
             '<style>table{border-collapse:collapse;margin:1em 0}td,th{border:1px solid #ccc;'
             'padding:3px 8px;text-align:right}img{max-width:900px}</style>\n'
             '</head><body>\n'
