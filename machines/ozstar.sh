@@ -7,9 +7,11 @@ PHANTOMBENCH_SYSTEMS=${PHANTOMBENCH_SYSTEMS:-"nt gfortran ifx"}
 modules_nt="aocc"
 modules_gfortran="gompi/2023a"
 modules_ifx="intel-compilers/2023.0.0"
-# whole milan node, all thread counts up to 64 cores
+# whole milan node, all thread counts up to 64 cores; OzSTAR does not allow --exclusive,
+# so the whole node is obtained by requesting all of its cores
 QPARTITION=${QPARTITION:-milan}
 NOMP=${NOMP:-64}
+QEXCLUSIVE=${QEXCLUSIVE:-no}
 PHANTOMBENCH_THREADS=${PHANTOMBENCH_THREADS:-"1 2 4 8 16 32 48 64"}
 WALLTIME=${WALLTIME:-48:00:00}
 # benchmark data (~3 GB) in project space rather than the home directory
