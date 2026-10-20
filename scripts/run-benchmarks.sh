@@ -72,7 +72,7 @@ codelog="code-$label-$nthreads.log";
 timelog="time-$label-$nthreads.log";
 evlog="ev-$label-$nthreads.log";
 makelog="make-$label.log";
-csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s"
+csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall"
 phantom_sha=`git -C $phantomdir rev-parse --short HEAD`;
 phantom_branch=`git -C $phantomdir rev-parse --abbrev-ref HEAD`;
 if [ -n "$(git -C $phantomdir status --porcelain -uno)" ]; then phantom_sha+="-dirty"; fi
@@ -315,7 +315,7 @@ write_csv()
   if [ "`head -1 $csvfile`" != "$csvheader" ]; then
      (echo "$csvheader"; tail -n +2 $csvfile) > $csvfile.tmp && mv $csvfile.tmp $csvfile;
   fi
-  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart" >> $csvfile;
+  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart,$codewall" >> $csvfile;
 }
 log_failure()
 {
@@ -346,6 +346,11 @@ parse_results()
   # wall time measured externally, independent of the clock used by the code
   wall=`head -1 $timelog | awk '{print $2}'`;
   cputime=`awk '$1=="user" || $1=="sys" {t+=$2} END {printf "%.2f", t}' $timelog`;
+  # total wall time according to phantom's own clock, used to rescale the timers in its
+  # timing table to the externally measured wall time; printed as e.g. "59.90 s" or
+  # "2 min,  25.88 s (=  1.4588E+02s)"
+  codewall=`awk '/Total wall time/ { if (match($0,/\(= *[0-9.E+-]+/)) { s=substr($0,RSTART+2,RLENGTH-2) }
+            else { for (i=1;i<=NF;i++) if ($i=="s") s=$(i-1) }; printf "%.2f", s }' $codelog`;
   nsteps=`grep 'Since code start' $codelog | tail -1 | awk '{print $4}'`;
   npart=`./$builddir/showheader ${dumpout} 2> /dev/null | grep -m1 -i 'nparttot' | awk '{print $NF}'`;
   # millions of particle updates per second: as printed by phantom with individual timesteps,
@@ -366,7 +371,10 @@ parse_results()
      log_failure "conservation worse than reference (see $rundir/$name/$evlog)";
   else
      cpuwall=`awk -v c=$cputime -v w=$wall 'BEGIN { if (w > 0) printf "%.1f", c/w }'`;
-     end_group notice "TIME: ${wall}s CPU/WALL: $cpuwall MPART/S: $mpart NSTEPS: $nsteps CONSERVATION: $status";
+     # time for the calculation from phantom's clock (excludes reading the dump and initial
+     # derivatives), unless that is not plausible, in which case the externally measured time
+     runtime=`awk -v c="$codewall" -v w=$wall 'BEGIN { if (c > 0 && c <= 1.02*w + 1) print c; else print w }'`;
+     end_group notice "TIME: ${runtime}s (TOTAL: ${wall}s) CPU/WALL: $cpuwall MPART/S: $mpart NSTEPS: $nsteps CONSERVATION: $status";
   fi
   write_csv;
 }

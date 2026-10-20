@@ -17,7 +17,9 @@ cd phantom-benchmarks
 PHANTOM_DIR=~/phantom ./phantombench
 ```
 
-This builds Phantom with `SYSTEM=gfortran`, downloads the initial conditions and runs the quick benchmarks. It uses one openMP thread per performance core. It then prints a summary and writes `runs/reports/<machine>/report.html`. Nothing is uploaded.
+This builds Phantom with `SYSTEM=gfortran`, downloads the initial conditions and runs the quick benchmarks. It uses one openMP thread per performance core. It then prints a summary, including where the time goes (tree build, density, force, the rest of the calculation, and startup, from Phantom's timing table), and writes `runs/reports/<machine>/report.html`. Nothing is uploaded.
+
+The benchmark time is Phantom's own total wall time, which excludes startup (reading the dump and computing the initial derivatives), so that timings are not dominated by disk speed. If Phantom's clock is not reliable (e.g. longer than the whole run), the externally measured time is used instead. The total including startup is also recorded.
 
 Requirements: what Phantom itself needs to build (a Fortran compiler and make), plus bash, curl, shasum and python3 (version 3.6 or later, standard library only). matplotlib is optional and only used to draw the scaling figures.
 
@@ -113,6 +115,7 @@ This writes the following to `runs/reports/<machine>/`:
 
 - a wall time / speedup / efficiency table, in markdown and in `scaling-hh48.tex` (a LaTeX table plus a paragraph ready to paste into an application);
 - `scaling-hh48.pdf` / `.png` (log-log wall time against cpus, with ideal scaling);
+- for each compiler, a table and figure (`scaling-hh48-<compiler>-routines.pdf` / `.png`) of how the time in each routine (tree, density, force, other, setup and I/O) scales with the number of cpus;
 - with `--su NPART:NSTEPS:NCORES:NRUNS`, an estimate of the service units for a production campaign.
 
 On a cluster, run all of the benchmarks with every compiler, with scaling tests on whole nodes, using

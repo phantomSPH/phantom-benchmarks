@@ -59,6 +59,21 @@ def latest(rows, key):
     return out
 
 
+def run_time(row):
+    """time for the calculation, excluding startup (reading the dump, initial derivatives),
+    from phantom's own clock; falls back to the externally measured wall time, which includes
+    startup, if phantom's clock is missing or not plausible (e.g. longer than the whole run)"""
+    wall, code = fnum(row['wall']), fnum(row.get('code_wall'))
+    if code and wall and code <= 1.02 * wall + 1.:
+        return code
+    return wall
+
+
+def fmt(t):
+    """time in seconds as a string"""
+    return f'{t:.2f}' if t is not None else ''
+
+
 def previous_wall(rows, row):
     """wall time of the previous successful run with the same benchmark, label and threads"""
     prev = None
@@ -67,7 +82,7 @@ def previous_wall(rows, row):
             return prev
         if (r['bench'], r['label'], r['nthreads']) == (row['bench'], row['label'], row['nthreads']) \
                 and r['status'] != 'fail':
-            prev = fnum(r['wall'])
+            prev = run_time(r)
     return prev
 
 
@@ -101,10 +116,10 @@ def html_table(header, body):
 def summary(rows):
     """table of the latest result for each benchmark, build and thread count"""
     last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads']))
-    header = ['benchmark', 'build', 'threads', 'npart', 'steps', 'wall (s)', 'change',
-              'Mpart/s', 'cpu (s)', 'cpu/wall', 'status', 'phantom', 'date']
-    body = [[r['bench'], r['label'], r['nthreads'], r['npart'], r['nsteps'], r['wall'],
-             pct(fnum(r['wall']), previous_wall(rows, r)), r.get('mpart_per_s') or '',
+    header = ['benchmark', 'build', 'threads', 'npart', 'steps', 'time (s)', 'change',
+              'total (s)', 'Mpart/s', 'cpu (s)', 'cpu/wall', 'status', 'phantom', 'date']
+    body = [[r['bench'], r['label'], r['nthreads'], r['npart'], r['nsteps'], fmt(run_time(r)),
+             pct(run_time(r), previous_wall(rows, r)), r['wall'], r.get('mpart_per_s') or '',
              r.get('cpu_time') or '', cpu_per_wall(r), r['status'], r['phantom_sha'],
              r['date'][:10]] for r in last.values()]
     return header, body
@@ -116,13 +131,72 @@ def cpu_per_wall(row):
     return f'{cpu / wall:.1f}' if cpu and wall else ''
 
 
+# parts of the run timed by phantom: building the tree, density and force calculations, the
+# rest of the calculation, and startup (reading the dump and initial derivatives)
+ROUTINES = ['tree', 'density', 'force', 'other', 'startup']
+
+
+def routine_times(row):
+    """time in each part of the run, adding up to the externally measured wall time"""
+    wall, code = fnum(row['wall']), fnum(row.get('code_wall'))
+    parts = [fnum(row.get(k)) for k in ('tree', 'density', 'force')]
+    if not wall or None in parts:
+        return None
+    # proportions come from phantom's timers, scaled to the time for the calculation
+    # (if phantom's clock is unreliable this is the whole run, so startup is not separated)
+    total = code or fnum(row.get('step'))
+    if not total:
+        return None
+    calc = run_time(row)
+    times = {k: t * calc / total for k, t in zip(ROUTINES, parts)}
+    times['other'] = calc - sum(times.values())
+    times['startup'] = wall - calc
+    return {k: max(t, 0.) for k, t in times.items()}
+
+
+def breakdown(rows):
+    """percentage of the wall time spent in each part, for the latest run of each build"""
+    last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads']))
+    header = ['benchmark', 'build', 'threads', 'total (s)'] + [f'{k} %' for k in ROUTINES]
+    body = []
+    for r in last.values():
+        t = routine_times(r)
+        if t:
+            body.append([r['bench'], r['label'], r['nthreads'], r['wall']] +
+                        [f'{100. * t[k] / fnum(r["wall"]):.0f}' for k in ROUTINES])
+    return header, body
+
+
+def routine_scaling(rows, bench, label):
+    """time in each part of the calculation against number of threads, for one build"""
+    ok = [r for r in rows if r['bench'] == bench and r['label'] == label and r['status'] != 'fail']
+    data = defaultdict(dict)
+    for (n,), r in sorted(latest(ok, lambda r: (int(r['nthreads']),)).items()):
+        t = routine_times(r)
+        if t:
+            for k in ROUTINES:
+                data[k][n] = t[k]
+    return data
+
+
+def routine_table(data):
+    """seconds in each part of the calculation for each thread count, with speedup at the end"""
+    threads = sorted(data['tree']) if data else []
+    header = ['threads'] + [f'{k} (s)' for k in ROUTINES]
+    body = [[n] + [f'{data[k][n]:.1f}' for k in ROUTINES] for n in threads]
+    if len(threads) > 1:
+        body.append(['speedup'] + [f'{speedup(data[k])[threads[-1]][0]:.1f}' if data[k][threads[0]] > 0
+                                   else '' for k in ROUTINES])
+    return header, body
+
+
 def scaling_data(rows, bench):
     """latest successful wall time for each build (label) and thread count"""
-    ok = [r for r in rows if r['bench'] == bench and r['status'] != 'fail' and fnum(r['wall'])]
+    ok = [r for r in rows if r['bench'] == bench and r['status'] != 'fail' and run_time(r)]
     last = latest(ok, lambda r: (r['label'], int(r['nthreads'])))
     data = defaultdict(dict)
     for (label, n), r in sorted(last.items(), key=lambda kv: kv[0][1]):
-        data[label][n] = fnum(r['wall'])
+        data[label][n] = run_time(r)
     return data, (ok[-1] if ok else None)
 
 
@@ -186,39 +260,49 @@ def su_estimate(rows, data, spec, bench):
     npart, nsteps, ncores, nruns = (float(x) for x in spec.split(':'))
     ok = [r for r in rows if r['bench'] == bench and r['status'] != 'fail' and fnum(r['npart'])]
     ref = min(ok, key=lambda r: abs(int(r['nthreads']) - ncores))
-    t = fnum(ref['wall']) * (npart / fnum(ref['npart'])) * (nsteps / fnum(ref['nsteps']))
+    t = run_time(ref) * (npart / fnum(ref['npart'])) * (nsteps / fnum(ref['nsteps']))
     ksu = t * ncores * nruns / 3600. / 1000.
     return (f'Based on the {bench} benchmark ({ref["npart"]} particles, {ref["nsteps"]} steps in '
-            f'{fnum(ref["wall"]):.1f}\\,s on {ref["nthreads"]} cores), each calculation with '
+            f'{run_time(ref):.1f}\\,s on {ref["nthreads"]} cores), each calculation with '
             f'{npart:.3g} particles and {nsteps:.3g} steps takes approximately '
             f'{t / 86400.:.1f} days on {ncores:.0f} cores ({t * ncores / 3.6e6:.1f} kSU per '
             f'calculation). This leads to a request for {ksu:.0f} kSU in total for '
             f'{nruns:.0f} calculations.')
 
 
-def scaling_plot(data, bench, machine, filebase):
-    """log-log plot of wall time vs number of threads with ideal scaling, if matplotlib exists"""
+def pyplot():
+    """matplotlib.pyplot if it is installed (it is optional), otherwise None"""
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        return plt
     except ImportError:
-        print('matplotlib not found: skipping scaling figure')
+        print('matplotlib not found: skipping scaling figures')
+        return None
+
+
+def plot_vs_threads(series, title, filebase):
+    """log-log plot of time against number of threads for each series, with ideal scaling"""
+    plt = pyplot()
+    if plt is None:
         return []
     fig, ax = plt.subplots(figsize=(5, 4))
-    for lab in sorted(data):
-        n = sorted(data[lab])
-        line, = ax.plot(n, [data[lab][i] for i in n], 'o-', label=f'{machine} ({lab})')
-        ax.plot(n, [data[lab][n[0]] * n[0] / i for i in n], ':', color=line.get_color())
+    threads = sorted({n for d in series.values() for n in d})
+    for name, times in series.items():
+        n = [i for i in sorted(times) if times[i] > 0]
+        if not n:
+            continue
+        line, = ax.plot(n, [times[i] for i in n], 'o-', label=name)
+        ax.plot(n, [times[n[0]] * n[0] / i for i in n], ':', color=line.get_color())
     ax.set_xscale('log', base=2)
     ax.set_yscale('log')
-    threads = sorted({n for d in data.values() for n in d})
     ax.set_xticks(threads)
     ax.set_xticklabels([str(n) for n in threads])
     ax.set_xlabel('number of cpus (openMP threads)')
     ax.set_ylabel('wall time (s)')
-    ax.set_title(f'{bench}: strong scaling')
-    ax.legend(frameon=False)
+    ax.set_title(title)
+    ax.legend(frameon=False, fontsize='small')
     fig.tight_layout()
     files = [filebase + ext for ext in ('.pdf', '.png')]
     for f in files:
@@ -227,12 +311,18 @@ def scaling_plot(data, bench, machine, filebase):
     return files
 
 
+def scaling_plot(data, bench, machine, filebase):
+    """wall time against number of threads for each build"""
+    series = {f'{machine} ({lab})': data[lab] for lab in sorted(data)}
+    return plot_vs_threads(series, f'{bench}: strong scaling', filebase)
+
+
 def history_chart(rows, bench, subtitle):
     """interactive google chart of wall time vs date for each build, as in the original nightly pages"""
     series = defaultdict(dict)
     for r in rows:
-        if r['bench'] == bench and r['status'] != 'fail' and fnum(r['wall']):
-            series[f"{r['machine']}-{r['label']}-{r['nthreads']}"][r['date'][:19]] = fnum(r['wall'])
+        if r['bench'] == bench and r['status'] != 'fail' and run_time(r):
+            series[f"{r['machine']}-{r['label']}-{r['nthreads']}"][r['date'][:19]] = run_time(r)
     if not series:
         return ''
     keys = sorted(series)
@@ -267,10 +357,10 @@ def compare(rows, base, head):
         b = last.get((bench, base, n))
         if label != head or b is None:
             continue
-        change = pct(fnum(h['wall']), fnum(b['wall']))
+        change = pct(run_time(h), run_time(b))
         slow = fnum(change.rstrip('%')) or 0.
         flag = ' :red_circle:' if slow > 10. else (' :orange_circle:' if slow > 5. else '')
-        body.append([bench, n, b['wall'], h['wall'], change + flag,
+        body.append([bench, n, fmt(run_time(b)), fmt(run_time(h)), change + flag,
                      f"{b['nsteps']} → {h['nsteps']}", f"{cpu_per_wall(b)} → {cpu_per_wall(h)}",
                      f"{b['status']} → {h['status']}"])
     return header, body
@@ -290,14 +380,14 @@ def status_html(rows, label):
                '<td><strong>Steps</strong></td><td><strong>Conservation</strong></td></tr>')
     nfail = nslow = 0
     for bench, r in sorted(last.items()):
-        change = pct(fnum(r['wall']), previous_wall(rows, r))
+        change = pct(run_time(r), previous_wall(rows, r))
         slow = fnum(change.rstrip('%')) or 0.
         ccol = colours['red'] if slow > 10. else (colours['amber'] if slow > 5. else colours['green'])
         ok = r['status'] != 'fail'
         nfail += not ok
         nslow += slow > 10.
         out.append(f'<tr><td bgcolor="{colours["green"] if ok else colours["red"]}">{bench}</td>'
-                   f'<td>{r["wall"]}</td><td bgcolor="{ccol}">{change or "N/A"}</td>'
+                   f'<td>{fmt(run_time(r))}</td><td bgcolor="{ccol}">{change or "N/A"}</td>'
                    f'<td>{r["rmserr"]}</td><td>{r["nsteps"]}</td><td>{r["status"]}</td></tr>')
     out.append(f'</table>\n<p>Completed {len(last)} benchmarks; <strong>{nfail} failures</strong>; '
                f'<strong>{nslow} slowdowns</strong></p>')
@@ -313,6 +403,11 @@ def write_report(rows, outdir, machine, do_scaling, su):
     htm = [f'<h1>Phantom benchmarks on {html.escape(machine)}</h1>',
            f'<p>CPU: {html.escape(rows[-1]["cpu"])}</p>', html_table(header, body)]
     print(markdown_table(header, body))
+    bheader, bbody = breakdown(rows)
+    if bbody:
+        md += ['', '## Where the time goes (% of wall time)', '', markdown_table(bheader, bbody)]
+        htm += ['<h2>Where the time goes (% of wall time)</h2>', html_table(bheader, bbody)]
+        print('\nWhere the time goes (% of wall time)\n' + markdown_table(bheader, bbody))
     for bench in sorted({r['bench'] for r in rows}):
         htm.append(history_chart(rows, bench, f'Performed on {machine}'))
         if not do_scaling:
@@ -335,6 +430,18 @@ def write_report(rows, outdir, machine, do_scaling, su):
                 f'<p>{html.escape(text)}</p>', f'<pre>{html.escape(tex)}</pre>']
         htm += [f'<img src="{os.path.basename(f)}">' for f in figs if f.endswith('.png')]
         print(f'\nStrong scaling: {bench}\n' + markdown_table(sheader, sbody) + '\n\n' + text)
+        # scaling of each part of the calculation, for each build
+        for lab in sorted(data):
+            rdata = routine_scaling(rows, bench, lab)
+            if len(rdata.get('tree', {})) < 2:
+                continue
+            rheader, rbody = routine_table(rdata)
+            rfigs = plot_vs_threads({k: rdata[k] for k in ROUTINES}, f'{bench} ({lab}): time per routine',
+                                    os.path.join(outdir, f'scaling-{bench}-{lab}-routines'))
+            md += ['', f'### Time per routine: {bench} ({lab})', '', markdown_table(rheader, rbody)]
+            htm += [f'<h3>Time per routine: {bench} ({lab})</h3>', html_table(rheader, rbody)]
+            htm += [f'<img src="{os.path.basename(f)}">' for f in rfigs if f.endswith('.png')]
+            print(f'\nTime per routine: {bench} ({lab})\n' + markdown_table(rheader, rbody))
     with open(os.path.join(outdir, 'report.md'), 'w') as f:
         f.write('\n'.join(md) + '\n')
     with open(os.path.join(outdir, 'report.html'), 'w') as f:
