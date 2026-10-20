@@ -5,9 +5,11 @@
 PHANTOMBENCH_SYSTEMS=${PHANTOMBENCH_SYSTEMS:-"gfortran nvfortran flang"}
 # name of the processor in the results (the system reports only the type of its cores)
 export PHANTOMBENCH_CPU=${PHANTOMBENCH_CPU:-"NVIDIA GB10"}
-# use every core, pinned, so that runs are reproducible
+# use every core, pinned, so that runs are reproducible. Threads fill the fast Cortex-X925
+# cores (cpus 5-9 and 15-19) first, then the Cortex-A725 cores, so that scaling up to
+# 10 threads is measured on the fast cores
 OMP_NUM_THREADS=${OMP_NUM_THREADS:-20}
 OMP_PROC_BIND=${OMP_PROC_BIND:-close}
-OMP_PLACES=${OMP_PLACES:-cores}
+OMP_PLACES=${OMP_PLACES:-"{5},{6},{7},{8},{9},{15},{16},{17},{18},{19},{0},{1},{2},{3},{4},{10},{11},{12},{13},{14}"}
 export OMP_PROC_BIND OMP_PLACES
 PHANTOMBENCH_THREADS=${PHANTOMBENCH_THREADS:-"1 2 4 6 8 10 12 16 20"}
