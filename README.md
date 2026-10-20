@@ -50,7 +50,7 @@ Commands:
 | `phantombench status` | writes an html summary of the latest results (used by `phantom/scripts/nightly.sh`) |
 | `phantombench site [dir]` | builds the website from all results |
 | `phantombench recheck [bench...]` | rechecks conservation of the runs saved on this machine against the current tolerances (e.g. after changing a `CONSERVE` file), updating their status in the results |
-| `phantombench publish` | commits this machine's results and pushes them to GitHub, which updates the website (needs push access) |
+| `phantombench publish` | commits this machine's results and pushes them to GitHub, which updates the website (needs push access). With `PHANTOMBENCH_PUBLISH=yes`, `run`, `scaling` and `compilers` publish when they finish |
 
 Settings are environment variables:
 
@@ -125,8 +125,8 @@ gh workflow run benchmarks -R phantomSPH/phantom-benchmarks -f phantom_ref="$(gi
 
 To benchmark Phantom's main branch regularly on a machine of your own, use cron. For example, compare compilers every night except Sunday, and run scaling tests on Sundays (the two must not overlap, since they use the same run directories), publishing the results each time (`crontab -e`):
 ```
-0 2 * * 1-6 bash -lc 'cd ~/phantom && git pull -q && cd ~/phantom-benchmarks && git pull -q && ./phantombench compilers; ./phantombench publish' > ~/phantombench-cron.log 2>&1
-0 2 * * 0   bash -lc 'cd ~/phantom && git pull -q && cd ~/phantom-benchmarks && git pull -q && ./phantombench scaling; ./phantombench publish' > ~/phantombench-cron.log 2>&1
+0 2 * * 1-6 bash -lc 'cd ~/phantom && git pull -q && cd ~/phantom-benchmarks && git pull -q && PHANTOMBENCH_PUBLISH=yes ./phantombench compilers' > ~/phantombench-cron.log 2>&1
+0 2 * * 0   bash -lc 'cd ~/phantom && git pull -q && cd ~/phantom-benchmarks && git pull -q && PHANTOMBENCH_PUBLISH=yes ./phantombench scaling' > ~/phantombench-cron.log 2>&1
 ```
 `bash -lc` loads your login environment, so that compilers such as nvfortran are on the `PATH`. Settings for the machine (compilers, threads) come from its file in [machines/](machines/), and publishing needs push access (see `phantombench publish`).
 
@@ -150,7 +150,7 @@ On a cluster, run all of the benchmarks with every compiler, with scaling tests 
 ./phantombench submit
 ```
 
-This downloads the data on the login node, then submits one job per compiler, each running a scaling test on a whole node. Job scripts are written with Phantom's `make qscript`. The settings for each cluster are in [machines/](machines/) (e.g. [machines/ozstar.sh](machines/ozstar.sh)): the compilers and the modules each one needs, the partition, cpus per node, thread counts, wall time and where to store the data. The file is chosen automatically from the login node's hostname. To add a cluster, copy one of these files. When the jobs have finished, commit `results/<machine>/*.csv` to add the results to the website.
+This downloads the data on the login node, then submits one job per compiler, each running a scaling test on a whole node. Job scripts are written with Phantom's `make qscript`. The settings for each cluster are in [machines/](machines/) (e.g. [machines/ozstar.sh](machines/ozstar.sh)): the compilers and the modules each one needs, the partition, cpus per node, thread counts, wall time and where to store the data. The file is chosen automatically from the login node's hostname. To add a cluster, copy one of these files. When the jobs have finished, run `./phantombench publish` to add the results to the website, or use `./phantombench submit-and-publish` instead of `submit`, which also submits a small job that publishes the results once all of the benchmark jobs have finished. That job needs internet access and push access to GitHub; if the compute nodes have no internet access, set `QPUBLISH_PARTITION` in the machine file to a partition that does.
 
 ## How to add benchmark problems to this suite
 
