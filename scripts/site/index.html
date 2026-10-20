@@ -34,12 +34,10 @@ nav { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--l
 nav button { background: none; border: none; color: var(--muted); font: inherit;
              padding: 8px 12px; cursor: pointer; border-bottom: 2px solid transparent; }
 nav button.active { color: var(--fg); border-bottom-color: var(--accent); }
-.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 12px 0; }
-.controls label { color: var(--muted); }
-select { background: var(--panel); color: var(--fg); border: 1px solid var(--line);
-         border-radius: 6px; padding: 4px 6px; font: inherit; }
-.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
-.chart { position: relative; height: 360px; background: var(--panel); border-radius: 8px; padding: 8px; }
+.chart { position: relative; height: 360px; background: var(--panel); border-radius: 8px;
+         padding: 8px; margin: 12px 0; }
+h2, h3 { scroll-margin-top: 12px; }
+h2 { border-top: 1px solid var(--line); padding-top: 1em; }
 .scroll { overflow-x: auto; }
 table { border-collapse: collapse; margin: 8px 0; font-variant-numeric: tabular-nums; }
 th, td { border-bottom: 1px solid var(--line); padding: 4px 10px; text-align: right; white-space: nowrap; }

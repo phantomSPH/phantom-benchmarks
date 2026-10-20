@@ -8,7 +8,10 @@
 # CPU model string, e.g. "Apple M3 Pro" or "AMD EPYC 7543 32-Core Processor"
 get_cpu_model()
 {
-  if [[ "$(uname)" == "Darwin" ]]; then
+  # a machine file can give the name of the processor, where the system only reports its cores
+  if [[ -n "$PHANTOMBENCH_CPU" ]]; then
+     echo "$PHANTOMBENCH_CPU"
+  elif [[ "$(uname)" == "Darwin" ]]; then
      sysctl -n machdep.cpu.brand_string
   elif command -v lscpu > /dev/null; then
      lscpu | grep -m1 'Model name' | cut -d: -f2- | sed 's/^ *//'

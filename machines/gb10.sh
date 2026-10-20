@@ -3,6 +3,8 @@
 #
 # Grace cpu with 20 cores (10 Cortex-X925 + 10 Cortex-A725). Compilers to compare, as phantom SYSTEMs
 PHANTOMBENCH_SYSTEMS=${PHANTOMBENCH_SYSTEMS:-"gfortran nvfortran flang"}
+# name of the processor in the results (the system reports only the type of its cores)
+export PHANTOMBENCH_CPU=${PHANTOMBENCH_CPU:-"NVIDIA GB10"}
 # use every core, pinned, so that runs are reproducible
 OMP_NUM_THREADS=${OMP_NUM_THREADS:-20}
 OMP_PROC_BIND=${OMP_PROC_BIND:-close}
