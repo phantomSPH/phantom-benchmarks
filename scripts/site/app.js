@@ -27,7 +27,7 @@ function groupBy(runs, key) {
   return g;
 }
 // largest number of threads run on each machine ("full node")
-const fullNode = m => Math.max(...RUNS.filter(r => r.machine === m).map(r => r.threads));
+const fullNode = m => Math.max(...RUNS.filter(r => r.machine === m && !(r.nmpi > 1 || r.label.endsWith('-mpi'))).map(r => r.threads));
 // machines are shown by their cpu and the number of cores used, e.g. "AMD EPYC 7763 (4 cores)",
 // with the machine name as a tooltip
 const cpuName = m => (RUNS.filter(r => r.machine === m).pop().cpu || m)
@@ -46,7 +46,11 @@ function latestTime(runs) {
 // runs ordered by machine (most cores first), then build, so that series appear in that order
 const byMachine = runs => [...runs].sort((p, q) =>
   machines().indexOf(p.machine) - machines().indexOf(q.machine) || p.label.localeCompare(q.label));
-const good = r => r.status !== 'fail' && r.time > 0 && !r.dirty;
+const ok = r => r.status !== 'fail' && r.time > 0 && !r.dirty;
+// openMP-only runs, used everywhere except the hybrid MPI and openMP results
+const isMpi = r => r.nmpi > 1 || r.label.endsWith('-mpi');
+const good = r => ok(r) && !isMpi(r);
+const hybrid = r => ok(r) && isMpi(r);
 // time per build (compiler) at full node on the latest phantom version, for one benchmark and machine
 const fullNodeTimes = (b, m) => new Map([...groupBy(RUNS.filter(r =>
   good(r) && r.bench === b && r.machine === m && r.threads === fullNode(m)), r => r.label)]
@@ -348,7 +352,8 @@ function scaling() {
   const byMachine = machines().map(m => [m, benches().map(b => [b, fastestCurve(b, m)]).filter(([, x]) => x)])
     .filter(([, ls]) => ls.length);
   if (!byBench.length) { c.appendChild(el('p', '<span class="note">no runs at more than one thread count yet</span>')); return; }
-  jumpTo(c, [...byBench.map(([b]) => [`scaling-${b}`, b]), ...byMachine.map(([m]) => [`scaling-on-${m}`, `all benchmarks on ${mlabel(m)}`])]);
+  jumpTo(c, [...byBench.map(([b]) => [`scaling-${b}`, b]), ...byMachine.map(([m]) => [`scaling-on-${m}`, `all benchmarks on ${mlabel(m)}`]),
+             ...hybridPairs().map(([b, m]) => [`hybrid-${b}-${m}`, `${b}, MPI on ${cpuName(m)}`])]);
   c.appendChild(el('p', '<span class="note">Wall time and speedup against number of cpus, using the fastest compiler ' +
     'on each machine. Dotted lines show ideal scaling; percentages are parallel efficiency, relative to the smallest ' +
     'number of threads (assuming ideal scaling below it).</span>'));
@@ -363,6 +368,35 @@ function scaling() {
     section(c, `scaling-on-${m}`, `Strong scaling of all benchmarks on ${mlabel(m)}`);
     scalingCharts(c, ls.map(([b, [lab, cv]]) => [`${b} (${lab})`, cv]));
   }
+  for (const [b, m] of hybridPairs()) hybridSection(c, b, m);
+}
+
+// benchmarks and machines with hybrid MPI and openMP runs
+const hybridPairs = () => uniq(RUNS.filter(hybrid).map(r => `${r.bench}|${r.machine}`)).map(k => k.split('|'));
+// time against total number of cores for each number of threads per MPI task, with the fastest
+// openMP-only result for comparison, and a table of every combination
+function hybridSection(c, b, m) {
+  const rs = RUNS.filter(r => hybrid(r) && r.bench === b && r.machine === m);
+  section(c, `hybrid-${b}-${m}`, `${b}: hybrid MPI and openMP on ${cpuName(m)}`);
+  const lines = [...groupBy(rs, r => r.threads)].sort((p, q) => q[0] - p[0]).map(([t, x]) =>
+    [`${t} threads per task`, new Map([...groupBy(x, r => r.nmpi * r.threads)].map(([n, y]) => [n, latestTime(y)])
+      .sort((p, q) => p[0] - q[0]))]);
+  const omp = fastestCurve(b, m);
+  const nmax = Math.max(...rs.map(r => r.nmpi * r.threads), ...(omp ? [...omp[1].keys()] : []));
+  const datasets = lines.map(([name, cv], i) => ({ label: name, endLabel: name, borderColor: colour(i), backgroundColor: 'transparent',
+    pointRadius: 4, borderWidth: 1.5, data: [...cv].map(([x, y]) => ({ x, y })) }));
+  if (omp) datasets.push({ label: `openMP only (${omp[0]})`, endLabel: 'openMP only', borderColor: css('--muted'), borderDash: [4, 3],
+    backgroundColor: 'transparent', pointRadius: 3, borderWidth: 1.5, data: [...omp[1]].map(([x, y]) => ({ x, y })) });
+  newChart(chartBox(c), { type: 'line', data: { datasets }, plugins: [endLabels],
+    options: { plugins: { legend: { display: false } }, layout: { padding: { right: 140 } },
+      scales: { x: ncpusAxis(nmax), y: axisStyle({ type: 'logarithmic', title: axisTitle('Wall Time (s)') }) } } });
+  const runs = [...groupBy(rs, r => `${r.nmpi}x${r.threads}|${r.label}`)].map(([k, x]) =>
+    ({ n: x[0].nmpi, t: x[0].threads, lab: x[0].label, time: latestTime(x) }))
+    .sort((p, q) => q.n * q.t - p.n * p.t || p.n - q.n);
+  const bestAt = n => Math.min(...runs.filter(x => x.n * x.t === n).map(x => x.time));
+  c.appendChild(table(['cores', 'MPI tasks × threads', 'build', 'time (s)', 'openMP only (s)'],
+    runs.map(x => [x.n * x.t, `${x.n} × ${x.t}`, x.lab, fmt(x.time), omp && omp[1].has(x.n * x.t) ? fmt(omp[1].get(x.n * x.t)) : '']),
+    runs.map(x => ['', '', '', x.time === bestAt(x.n * x.t) ? 'best' : '', ''])));
 }
 
 // ---------------------------------------------------------------- history

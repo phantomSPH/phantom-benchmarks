@@ -27,6 +27,11 @@
 #                         node. Settings for known clusters are in machines/<name>.sh
 #   submit-and-publish    as submit, plus a job that publishes the results when they have finished
 #   qscript [bench...]    write the batch job script for one compiler (via phantom's make qscript)
+#   hybrid [bench...]     hybrid MPI and openMP scaling test, over the combinations of MPI tasks
+#                         and threads in PHANTOMBENCH_HYBRID (e.g. "1:64 2:32 4:16"), then report
+#   submit-hybrid [bench...]  on a cluster: submit hybrid scaling tests, one job per compiler in
+#                         PHANTOMBENCH_HYBRID_SYSTEMS on PHANTOMBENCH_HYBRID_NODES nodes
+#                         (submit-hybrid-and-publish also publishes the results)
 #
 # With no command, runs the quick tier with sensible defaults for this machine.
 #
@@ -54,7 +59,7 @@ report="python3 $scriptdir/report.py --results ${PHANTOMBENCH_RESULTS:-$topdir/r
 
 usage()
 {
-  sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//';
+  sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//';
 }
 
 # recheck conservation of the runs saved in runs/<bench>/<label>/saved-<label>-<nthreads>.ev
@@ -99,6 +104,13 @@ submit_job()
   fi
 }
 
+# partition for make qscript: QPARTITION=none requests no partition at all, overriding any
+# default for the SYSTEM in phantom (for clusters that choose the partition automatically)
+partition()
+{
+  if [[ "$1" == "none" ]]; then echo "QNAME= QPARTITION="; elif [ -n "$1" ]; then echo "QPARTITION=$1"; fi
+}
+
 command=${1:-run}
 [ $# -gt 0 ] && shift
 case "$command" in
@@ -122,6 +134,13 @@ case "$command" in
         SYSTEM=$system PHANTOMBENCH_LABEL=$system $scriptdir/run-benchmarks.sh "$@" || status=1;
      done
      $report --machine $PHANTOMBENCH_MACHINE "$@";
+     finish $status;;
+  hybrid)
+     status=0;
+     for system in ${PHANTOMBENCH_HYBRID_SYSTEMS:-$SYSTEM}; do
+        SYSTEM=$system $scriptdir/hybrid.sh "$@" || status=1;
+     done
+     $report --machine $PHANTOMBENCH_MACHINE --hybrid "$@";
      finish $status;;
   compare)
      $report --machine $PHANTOMBENCH_MACHINE --compare "$@";;
@@ -150,6 +169,11 @@ case "$command" in
   site)
      # the phantom checkout is used to order results by phantom version
      $report --site ${1:-$topdir/site} --phantom $PHANTOM_DIR;;
+  submit-hybrid|submit-hybrid-and-publish)
+     # one job per compiler in PHANTOMBENCH_HYBRID_SYSTEMS, each on PHANTOMBENCH_HYBRID_NODES nodes
+     [[ $command == *publish ]] && export PHANTOMBENCH_SUBMIT_PUBLISH=yes;
+     PHANTOMBENCH_QSCRIPT_HYBRID=yes PHANTOMBENCH_SYSTEMS="${PHANTOMBENCH_HYBRID_SYSTEMS:-$SYSTEM}" \
+        PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-quick} exec $0 submit "$@";;
   submit-and-publish)
      PHANTOMBENCH_SUBMIT_PUBLISH=yes exec $0 submit "$@";;
   submit)
@@ -160,7 +184,7 @@ case "$command" in
      mkdir -p $rundir/jobs;
      nfail=0; ids="";
      for system in ${PHANTOMBENCH_SYSTEMS:-$SYSTEM}; do
-        job=$rundir/jobs/phantombench-$system.q;
+        job=$rundir/jobs/phantombench-$system${PHANTOMBENCH_QSCRIPT_HYBRID:+-hybrid}.q;
         SYSTEM=$system PHANTOMBENCH_LABEL=$system $0 qscript "$@" > $job || exit 1;
         if id=`submit_job $job`; then echo "$system: job $id"; ids+=":$id"; else nfail=$(( nfail + 1 )); fi
      done
@@ -169,7 +193,7 @@ case "$command" in
         # a small job that publishes the results once all of the benchmark jobs have finished
         job=$rundir/jobs/phantombench-publish.q;
         make --no-print-directory -s -C $PHANTOM_DIR qscript SYSTEM=$SYSTEM OPENMP=yes NOMP=1 \
-             QPARTITION=${QPUBLISH_PARTITION:-$QPARTITION} ${QPROJECT:+QPROJECT=$QPROJECT} \
+             `partition ${QPUBLISH_PARTITION:-$QPARTITION}` ${QPROJECT:+QPROJECT=$QPROJECT} \
              QEXCLUSIVE=no JOBNAME=phantombench-publish WALLTIME=00:30:00 MAXMEM=2G MAILTO="$MAILTO" \
              CMD="cd $topdir && PHANTOMBENCH_MACHINE=$PHANTOMBENCH_MACHINE ./phantombench publish" > $job || exit 1;
         id=`submit_job $job $ids` && echo "publish: job $id, after the benchmark jobs finish" || exit 1;
@@ -182,15 +206,24 @@ case "$command" in
         echo "       update it (git pull) or set PHANTOM_DIR to a newer version" >&2
         exit 1
      fi
-     # job script running a scaling test on a whole node, via phantom's "make qscript".
+     # job script running a scaling test on a whole node, via phantom's "make qscript", or for
+     # hybrid MPI and openMP tests, on PHANTOMBENCH_HYBRID_NODES nodes of NOMP cores each.
      # Modules are from PHANTOMBENCH_QMODULES or modules_<SYSTEM> in the machine file;
      # NOMP sets the cpus requested, otherwise the default for this SYSTEM in phantom
      modules=modules_$SYSTEM;
-     make --no-print-directory -s -C $PHANTOM_DIR qscript SYSTEM=$SYSTEM OPENMP=yes ${NOMP:+NOMP=$NOMP} \
-          ${QPARTITION:+QPARTITION=$QPARTITION} ${QPROJECT:+QPROJECT=$QPROJECT} \
-          QEXCLUSIVE=${QEXCLUSIVE:-yes} JOBNAME=phantombench-$label WALLTIME=${WALLTIME:-24:00:00} \
+     if [[ "$PHANTOMBENCH_QSCRIPT_HYBRID" == "yes" ]]; then
+        # all cores of the nodes as single-cpu tasks; each run then uses some of them as
+        # MPI tasks with several threads each (srun -n ... -c ...)
+        nodes="NMPI=$(( PHANTOMBENCH_HYBRID_NODES * NOMP )) NOMP=1 QEXTRA=--nodes=$PHANTOMBENCH_HYBRID_NODES";
+        run="PHANTOMBENCH_HYBRID_SYSTEMS=$SYSTEM ./phantombench hybrid";
+     else
+        nodes=""; run="PHANTOMBENCH_SYSTEMS=$SYSTEM PHANTOMBENCH_LABEL=$label ./phantombench scaling";
+     fi
+     make --no-print-directory -s -C $PHANTOM_DIR qscript SYSTEM=$SYSTEM OPENMP=yes ${NOMP:+NOMP=$NOMP} $nodes \
+          `partition $QPARTITION` ${QPROJECT:+QPROJECT=$QPROJECT} \
+          QEXCLUSIVE=${QEXCLUSIVE:-yes} JOBNAME=phantombench-$label${PHANTOMBENCH_QSCRIPT_HYBRID:+-hybrid} WALLTIME=${WALLTIME:-24:00:00} \
           MAXMEM=${MAXMEM:-64G} QMODULES="${PHANTOMBENCH_QMODULES:-${!modules}}" MAILTO="$MAILTO" \
-          CMD="cd $topdir && SYSTEM=$SYSTEM PHANTOMBENCH_SYSTEMS=$SYSTEM PHANTOMBENCH_LABEL=$label PHANTOM_DIR=$PHANTOM_DIR PHANTOMBENCH_MACHINE=$PHANTOMBENCH_MACHINE PHANTOMBENCH_MAKEFLAGS=\"$PHANTOMBENCH_MAKEFLAGS\" PHANTOMBENCH_DATA=$PHANTOMBENCH_DATA PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-all} ${PHANTOMBENCH_THREADS:+PHANTOMBENCH_THREADS=\"$PHANTOMBENCH_THREADS\"} ${PHANTOMBENCH_PUBLISH:+PHANTOMBENCH_PUBLISH=$PHANTOMBENCH_PUBLISH} ./phantombench scaling $*";;
+          CMD="cd $topdir && SYSTEM=$SYSTEM PHANTOM_DIR=$PHANTOM_DIR PHANTOMBENCH_MACHINE=$PHANTOMBENCH_MACHINE PHANTOMBENCH_MAKEFLAGS=\"$PHANTOMBENCH_MAKEFLAGS\" PHANTOMBENCH_DATA=$PHANTOMBENCH_DATA PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-all} ${PHANTOMBENCH_THREADS:+PHANTOMBENCH_THREADS=\"$PHANTOMBENCH_THREADS\"} ${PHANTOMBENCH_PUBLISH:+PHANTOMBENCH_PUBLISH=$PHANTOMBENCH_PUBLISH} $run $*";;
   help|-h|--help)
      usage;;
   *)

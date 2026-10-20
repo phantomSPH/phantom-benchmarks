@@ -152,6 +152,16 @@ On a cluster, run all of the benchmarks with every compiler, with scaling tests 
 
 This downloads the data on the login node, then submits one job per compiler, each running a scaling test on a whole node. Job scripts are written with Phantom's `make qscript`. The settings for each cluster are in [machines/](machines/) (e.g. [machines/ozstar.sh](machines/ozstar.sh)): the compilers and the modules each one needs, the partition, cpus per node, thread counts, wall time and where to store the data. The file is chosen automatically from the login node's hostname. To add a cluster, copy one of these files. When the jobs have finished, run `./phantombench publish` to add the results to the website, or use `./phantombench submit-and-publish` instead of `submit`, which also submits a small job that publishes the results once all of the benchmark jobs have finished. That job needs internet access and push access to GitHub; if the compute nodes have no internet access, set `QPUBLISH_PARTITION` in the machine file to a partition that does.
 
+### Hybrid MPI and openMP
+
+To test combinations of MPI tasks and openMP threads on several nodes, use
+
+```
+./phantombench submit-hybrid            # or submit-hybrid-and-publish
+```
+
+This submits one job per compiler in `PHANTOMBENCH_HYBRID_SYSTEMS` (which need an MPI library in their modules), each on `PHANTOMBENCH_HYBRID_NODES` nodes, running the quick benchmarks with each combination `tasks:threads` in `PHANTOMBENCH_HYBRID`, launched with `PHANTOMBENCH_MPIRUN` (all set in the machine file, e.g. `srun -n $NMPI -c $OMP_NUM_THREADS --cpu-bind=cores`). Phantom is built with `MPI=yes`, and the results are labelled e.g. `gfortran-mpi`. The reports and the Scaling tab of the website compare the time for each combination with the openMP-only result on the same number of cores. On a single machine, `PHANTOMBENCH_HYBRID="1:8 2:4 4:2" ./phantombench hybrid` runs the same test directly.
+
 ## How to add benchmark problems to this suite
 
 1. Clone the repository to your local machine

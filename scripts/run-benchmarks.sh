@@ -22,7 +22,8 @@
 #   PHANTOMBENCH_RUNDIR     where to run the calculations (default runs/)
 #   PHANTOMBENCH_MACHINE    machine name used to label results (default hostname)
 #   PHANTOMBENCH_UPDATE_REF set to yes to store this run as the reference for the benchmark
-#   MPI=yes                 run with mpirun -np $NMPI (default 4)
+#   MPI=yes                 build with MPI, and run $NMPI MPI tasks (default 4) of $OMP_NUM_THREADS
+#                           threads each, using PHANTOMBENCH_MPIRUN (default "mpirun -np $NMPI")
 #   RETURN_ERR=yes          exit with error status if any benchmark fails
 #
 if [ X$SYSTEM == X ]; then
@@ -48,7 +49,8 @@ source "$scriptdir/machine.sh"
 #
 phantomdir=${PHANTOM_DIR};
 nthreads=${OMP_NUM_THREADS};
-label=${PHANTOMBENCH_LABEL:-$SYSTEM};
+# builds with MPI are labelled separately, e.g. gfortran-mpi
+if [[ $MPI == "yes" ]]; then label=${PHANTOMBENCH_LABEL:-$SYSTEM-mpi}; else label=${PHANTOMBENCH_LABEL:-$SYSTEM}; fi
 tier=${PHANTOMBENCH_TIER:-all};
 srcdir=$topdir/benchmarks;
 datadir=${PHANTOMBENCH_DATA:-~/.cache/phantombench};
@@ -87,7 +89,7 @@ nfail=0
 build_benchmark()
 {
    setup=`awk '{print $1}' $src/SETUP`;
-   makeflags="`cut -s -d' ' -f2- $src/SETUP` $PHANTOMBENCH_MAKEFLAGS";
+   makeflags="`cut -s -d' ' -f2- $src/SETUP` $PHANTOMBENCH_MAKEFLAGS ${MPI:+MPI=$MPI}";
    buildtag="$phantomdir $phantom_sha $SYSTEM $makeflags";
    mkdir -p $builddir; cd $builddir;
    if [[ "$phantom_sha" != *-dirty && -x phantom && -x diffdumps && -x showheader \
@@ -246,7 +248,8 @@ run_code()
   rm -f ${dumpout} ${evfile} ${logfile};
   if [[ $MPI == "yes" ]]; then
     nmpi=${NMPI:-4}
-    mpirun="mpirun -np $nmpi"
+    # e.g. "srun -n $NMPI -c $OMP_NUM_THREADS" on a cluster
+    mpirun=`NMPI=$nmpi; eval echo ${PHANTOMBENCH_MPIRUN:-'mpirun -np $NMPI'}`
   else
     nmpi=1
     mpirun=""

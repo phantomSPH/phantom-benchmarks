@@ -78,13 +78,28 @@ def fmt(t):
     return f'{t:.2f}' if t is not None else ''
 
 
+def nmpi(row):
+    """number of MPI tasks (1 for runs without MPI)"""
+    return int(fnum(row.get('nmpi')) or 1)
+
+
+def is_mpi(row):
+    """run with a build that uses MPI (labelled e.g. gfortran-mpi), with any number of tasks"""
+    return nmpi(row) > 1 or row['label'].endswith('-mpi')
+
+
+def cpus(row):
+    """threads, or MPI tasks x threads for runs with MPI"""
+    return f"{nmpi(row)}x{row['nthreads']}" if nmpi(row) > 1 else row['nthreads']
+
+
 def previous_wall(rows, row):
     """wall time of the previous successful run with the same benchmark, label and threads"""
     prev = None
     for r in rows:
         if r is row:
             return prev
-        if (r['bench'], r['label'], r['nthreads']) == (row['bench'], row['label'], row['nthreads']) \
+        if (r['bench'], r['label'], r['nthreads'], nmpi(r)) == (row['bench'], row['label'], row['nthreads'], nmpi(row)) \
                 and r['status'] != 'fail':
             prev = run_time(r)
     return prev
@@ -119,10 +134,10 @@ def html_table(header, body):
 
 def summary(rows):
     """table of the latest result for each benchmark, build and thread count"""
-    last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads']))
+    last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads'], nmpi(r)))
     header = ['benchmark', 'build', 'threads', 'npart', 'steps', 'time (s)', 'change',
               'total (s)', 'Mpart/s', 'cpu (s)', 'cpu/wall', 'status', 'phantom', 'date']
-    body = [[r['bench'], r['label'], r['nthreads'], r['npart'], r['nsteps'], fmt(run_time(r)),
+    body = [[r['bench'], r['label'], cpus(r), r['npart'], r['nsteps'], fmt(run_time(r)),
              pct(run_time(r), previous_wall(rows, r)), r['wall'], r.get('mpart_per_s') or '',
              r.get('cpu_time') or '', cpu_per_wall(r), r['status'], r['phantom_sha'],
              r['date'][:10]] for r in last.values()]
@@ -160,20 +175,20 @@ def routine_times(row):
 
 def breakdown(rows):
     """percentage of the wall time spent in each part, for the latest run of each build"""
-    last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads']))
+    last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads'], nmpi(r)))
     header = ['benchmark', 'build', 'threads', 'total (s)'] + [f'{k} %' for k in ROUTINES]
     body = []
     for r in last.values():
         t = routine_times(r)
         if t:
-            body.append([r['bench'], r['label'], r['nthreads'], r['wall']] +
+            body.append([r['bench'], r['label'], cpus(r), r['wall']] +
                         [f'{100. * t[k] / fnum(r["wall"]):.0f}' for k in ROUTINES])
     return header, body
 
 
 def routine_scaling(rows, bench, label):
     """time in each part of the calculation against number of threads, for one build"""
-    ok = [r for r in rows if r['bench'] == bench and r['label'] == label and r['status'] != 'fail']
+    ok = [r for r in rows if r['bench'] == bench and r['label'] == label and r['status'] != 'fail' and not is_mpi(r)]
     data = defaultdict(dict)
     for (n,), r in sorted(latest(ok, lambda r: (int(r['nthreads']),)).items()):
         t = routine_times(r)
@@ -196,7 +211,7 @@ def routine_table(data):
 
 def scaling_data(rows, bench):
     """latest successful wall time for each build (label) and thread count"""
-    ok = [r for r in rows if r['bench'] == bench and r['status'] != 'fail' and run_time(r)]
+    ok = [r for r in rows if not is_mpi(r) and r['bench'] == bench and r['status'] != 'fail' and run_time(r)]
     last = latest(ok, lambda r: (r['label'], int(r['nthreads'])))
     data = defaultdict(dict)
     for (label, n), r in sorted(last.items(), key=lambda kv: kv[0][1]):
@@ -223,6 +238,23 @@ def scaling_tables(data):
             s = speedup(data[lab]).get(n)
             row.append(f'{s[0]:.1f} / {100 * s[1]:.0f}%' if s else '')
         body.append(row)
+    return header, body
+
+
+def hybrid_table(rows, bench):
+    """time for each combination of MPI tasks and openMP threads, by total number of cores,
+    compared with the fastest openMP-only run on the same number of cores"""
+    ok = [r for r in rows if r['bench'] == bench and r['status'] != 'fail' and run_time(r)
+          and is_mpi(r)]
+    if not ok:
+        return None, None
+    omp, _ = scaling_data(rows, bench)
+    last = latest(ok, lambda r: (r['label'], nmpi(r), int(r['nthreads'])))
+    header = ['cores', 'build', 'MPI tasks x threads', 'time (s)', 'openMP only (s)']
+    body = []
+    for (lab, n, t), r in sorted(last.items(), key=lambda kv: (-kv[0][1] * kv[0][2], kv[0][1])):
+        ref = [d[n * t] for d in omp.values() if n * t in d]
+        body.append([n * t, lab, f'{n}x{t}', fmt(run_time(r)), fmt(min(ref)) if ref else ''])
     return header, body
 
 
@@ -380,7 +412,7 @@ def status_html(rows, label):
     return '\n'.join(out)
 
 
-def write_report(rows, outdir, machine, do_scaling, su):
+def write_report(rows, outdir, machine, do_scaling, su, do_hybrid=False):
     """write markdown and html reports for one machine, print summary to terminal"""
     os.makedirs(outdir, exist_ok=True)
     header, body = summary(rows)
@@ -395,6 +427,11 @@ def write_report(rows, outdir, machine, do_scaling, su):
         htm += ['<h2>Where the time goes (% of wall time)</h2>', html_table(bheader, bbody)]
         print('\nWhere the time goes (% of wall time)\n' + markdown_table(bheader, bbody))
     for bench in sorted({r['bench'] for r in rows}):
+        hheader, hbody = hybrid_table(rows, bench) if do_hybrid else (None, None)
+        if hbody:
+            md += ['', f'## Hybrid MPI and openMP: {bench}', '', markdown_table(hheader, hbody)]
+            htm += [f'<h2>Hybrid MPI and openMP: {bench}</h2>', html_table(hheader, hbody)]
+            print(f'\nHybrid MPI and openMP: {bench}\n' + markdown_table(hheader, hbody))
         if not do_scaling:
             continue
         data, ref = scaling_data(rows, bench)
@@ -488,7 +525,7 @@ def site_data(rows, commits):
         sha = info['full'][:7] if info else r['phantom_sha'].replace('-dirty', '')
         runs.append({
             'machine': r['machine'], 'cpu': r['cpu'], 'bench': r['bench'], 'label': r['label'],
-            'compiler': r['compiler'], 'threads': int(r['nthreads']), 'sha': sha,
+            'compiler': r['compiler'], 'threads': int(r['nthreads']), 'nmpi': nmpi(r), 'sha': sha,
             'dirty': r['phantom_sha'].endswith('-dirty'), 'branch': r['phantom_branch'],
             'sha_date': info.get('date') or r.get('phantom_date') or r['date'],
             'subject': info.get('subject', ''), 'date': r['date'], 'npart': fnum(r['npart']),
@@ -518,7 +555,7 @@ def write_site(resultsdir, sitedir, phantomdir=None):
     allrows = read_results(resultsdir)
     for machine in sorted({r['machine'] for r in allrows}):
         write_report([r for r in allrows if r['machine'] == machine],
-                     os.path.join(sitedir, machine), machine, True, None)
+                     os.path.join(sitedir, machine), machine, True, None, True)
     figures = {}
     for bench in sorted({r['bench'] for r in allrows}):
         series = best_scaling(allrows, bench)
@@ -553,6 +590,7 @@ def main():
     parser.add_argument('--status-html', metavar='LABEL',
                         help='print html summary of latest results for one build')
     parser.add_argument('--scaling', action='store_true', help='include strong scaling output')
+    parser.add_argument('--hybrid', action='store_true', help='include hybrid MPI and openMP output')
     parser.add_argument('--compare', nargs=2, metavar=('BASE', 'HEAD'))
     parser.add_argument('--su', metavar='NPART:NSTEPS:NCORES:NRUNS',
                         help='estimate service units for a production run')
@@ -579,7 +617,7 @@ def main():
         return
     machine = args.machine or rows[-1]['machine']
     write_report(rows, os.path.join(args.reports, machine), machine,
-                 args.scaling or bool(args.su), args.su)
+                 args.scaling or bool(args.su), args.su, args.hybrid)
 
 
 if __name__ == '__main__':
