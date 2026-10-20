@@ -13,6 +13,8 @@
 #                         (e.g. on a cluster login node, if compute nodes have no internet)
 #   reference [bench...]  rerun benchmarks and store reference data for conservation
 #                         checks, the reference dump and the .hashlist
+#   recheck [bench...]    recheck conservation of the saved runs on this machine against the
+#                         current tolerances, updating their status in the results
 #   report [options]      write reports from the stored results (see scripts/report.py -h)
 #   status                write html summary of latest results (used by phantom's nightly.sh)
 #   site [dir]            build the static website from all stored results
@@ -46,7 +48,31 @@ report="python3 $scriptdir/report.py --results ${PHANTOMBENCH_RESULTS:-$topdir/r
 
 usage()
 {
-  sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//';
+  sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//';
+}
+
+# recheck conservation of the runs saved in runs/<bench>/saved-<label>-<nthreads>.ev
+# against the current CONSERVE and conservation.ref, updating the status and conservation
+# errors of the latest result for that build and thread count
+recheck_runs()
+{
+  csvdir=${PHANTOMBENCH_RESULTS:-$topdir/results}/$PHANTOMBENCH_MACHINE;
+  for name in ${@:-`ls $rundir`}; do
+     for evsaved in $rundir/$name/saved-*.ev; do
+        [ -e "$evsaved" ] && [ -e $csvdir/$name.csv ] || continue;
+        key=`basename $evsaved .ev`; key=${key#saved-};
+        nthreads=${key##*-}; lab=${key%-*}; csvfile=$csvdir/$name.csv;
+        result=`python3 $scriptdir/evcheck.py $evsaved $topdir/benchmarks/$name/CONSERVE \
+                $topdir/benchmarks/$name/conservation.ref | grep RESULT`;
+        status=`echo $result | awk '{print $2}'`; cons=`echo $result | awk '{print $3}' | tr ',' ';'`;
+        old=`awk -F, -v l="$lab" -v n="$nthreads" '$4==l && $7==n {s=$20} END {print s}' $csvfile`;
+        # the file is read twice: first to find the last matching row, then to update it
+        awk -F, -v OFS=, -v l="$lab" -v n="$nthreads" -v s="$status" -v c="$cons" \
+            'NR==FNR { if ($4==l && $7==n) last=FNR; next } FNR==last { $20=s; $21=c } 1' \
+            $csvfile $csvfile > $csvfile.tmp && mv $csvfile.tmp $csvfile;
+        echo "$name ($lab, $nthreads threads): $old -> $status";
+     done
+  done
 }
 
 command=${1:-run}
@@ -79,6 +105,9 @@ case "$command" in
      PHANTOMBENCH_FETCH_ONLY=yes $scriptdir/run-benchmarks.sh "$@";;
   reference)
      RETURN_ERR=yes PHANTOMBENCH_UPDATE_REF=yes $scriptdir/run-benchmarks.sh "$@";;
+  recheck)
+     recheck_runs "$@";
+     $report --machine $PHANTOMBENCH_MACHINE "$@";;
   report)
      $report "$@";;
   status)

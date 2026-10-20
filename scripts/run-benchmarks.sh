@@ -266,6 +266,8 @@ run_code()
   if [[ "$PHANTOMBENCH_UPDATE_REF" == "yes" ]]; then refflag="--update-ref"; else refflag=""; fi
   if [ -e ${evfile} ]; then
      python3 $scriptdir/evcheck.py ${evfile} $src/CONSERVE $src/conservation.ref $refflag > $evlog;
+     # keep the .ev file of each completed run, so it can be rechecked if tolerances change
+     if [ -e ${dumpout} ]; then cp ${evfile} saved-$label-$nthreads.ev; fi
   fi
   # informational only: differences compared to reference dump
   if [ -e ${dumpout}.ref ] && [ -e ${dumpout} ]; then

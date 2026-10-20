@@ -47,6 +47,7 @@ Commands:
 | `phantombench reference [bench...]` | regenerates the reference data for a benchmark (maintainers) |
 | `phantombench status` | writes an html summary of the latest results (used by `phantom/scripts/nightly.sh`) |
 | `phantombench site [dir]` | builds the website from all results |
+| `phantombench recheck [bench...]` | rechecks conservation of the runs saved on this machine against the current tolerances (e.g. after changing a `CONSERVE` file), updating their status in the results |
 | `phantombench publish` | commits this machine's results and pushes them to GitHub, which updates the website (needs push access) |
 
 Settings are environment variables:
