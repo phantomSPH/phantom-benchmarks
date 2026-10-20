@@ -1,4 +1,6 @@
 # 10M particle tidal disruption event in general relativity (Kerr metric), individual timesteps
 # momentum is not conserved in an external metric; compare energy and angular momentum to reference
+# angtot error varies by ~10% between machines (1.168e-13 on Apple M3, 1.289e-13 on GB10),
+# so its tolerance is raised to 1.5e-13 (= 676 x machine epsilon)
 etot   ref
-angtot ref
+angtot ref 676

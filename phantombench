@@ -16,6 +16,8 @@
 #   report [options]      write reports from the stored results (see scripts/report.py -h)
 #   status                write html summary of latest results (used by phantom's nightly.sh)
 #   site [dir]            build the static website from all stored results
+#   publish               commit this machine's results and push them to GitHub,
+#                         which also updates the website (needs push access)
 #   submit [bench...]     on a cluster: download the data, then submit one job per compiler
 #                         in PHANTOMBENCH_SYSTEMS, each running a scaling test on an exclusive
 #                         node. Settings for known clusters are in machines/<name>.sh
@@ -44,7 +46,7 @@ report="python3 $scriptdir/report.py --results ${PHANTOMBENCH_RESULTS:-$topdir/r
 
 usage()
 {
-  sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//';
+  sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//';
 }
 
 command=${1:-run}
@@ -56,7 +58,12 @@ case "$command" in
      $report --machine $PHANTOMBENCH_MACHINE "$@";
      exit $status;;
   scaling)
-     $scriptdir/scaling.sh "$@"; status=$?;
+     status=0;
+     # every compiler for this machine, or a single build with its own label
+     for system in ${PHANTOMBENCH_SYSTEMS:-$SYSTEM}; do
+        if [ -n "$PHANTOMBENCH_SYSTEMS" ]; then lab=$system; else lab=$label; fi
+        SYSTEM=$system PHANTOMBENCH_LABEL=$lab $scriptdir/scaling.sh "$@" || status=1;
+     done
      $report --machine $PHANTOMBENCH_MACHINE --scaling "$@";
      exit $status;;
   compilers)
@@ -78,6 +85,15 @@ case "$command" in
      mkdir -p $rundir;
      $report --machine $PHANTOMBENCH_MACHINE --status-html $label > $rundir/opt-status-$label.html;
      echo "written to $rundir/opt-status-$label.html";;
+  publish)
+     # commit only this machine's results, after picking up any pushed since (e.g. by the
+     # GitHub Actions bot); other changes in the working copy are left alone
+     cd $topdir;
+     results=results/$PHANTOMBENCH_MACHINE;
+     git pull --rebase --autostash || exit 1;
+     git add $results;
+     if git diff --cached --quiet -- $results; then echo "no new results in $results"; exit 0; fi
+     git commit -m "results: $PHANTOMBENCH_MACHINE `date +%F`" -- $results && git push;;
   site)
      $report --site ${1:-$topdir/site};;
   submit)
@@ -102,7 +118,7 @@ case "$command" in
           ${QPARTITION:+QPARTITION=$QPARTITION} ${QPROJECT:+QPROJECT=$QPROJECT} \
           QEXCLUSIVE=yes JOBNAME=phantombench-$label WALLTIME=${WALLTIME:-24:00:00} \
           MAXMEM=${MAXMEM:-64G} QMODULES="${PHANTOMBENCH_QMODULES:-${!modules}}" MAILTO="$MAILTO" \
-          CMD="cd $topdir && SYSTEM=$SYSTEM PHANTOMBENCH_LABEL=$label PHANTOM_DIR=$PHANTOM_DIR PHANTOMBENCH_MACHINE=$PHANTOMBENCH_MACHINE PHANTOMBENCH_MAKEFLAGS=\"$PHANTOMBENCH_MAKEFLAGS\" PHANTOMBENCH_DATA=$PHANTOMBENCH_DATA PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-all} ${PHANTOMBENCH_THREADS:+PHANTOMBENCH_THREADS=\"$PHANTOMBENCH_THREADS\"} ./phantombench scaling $*";;
+          CMD="cd $topdir && SYSTEM=$SYSTEM PHANTOMBENCH_SYSTEMS=$SYSTEM PHANTOMBENCH_LABEL=$label PHANTOM_DIR=$PHANTOM_DIR PHANTOMBENCH_MACHINE=$PHANTOMBENCH_MACHINE PHANTOMBENCH_MAKEFLAGS=\"$PHANTOMBENCH_MAKEFLAGS\" PHANTOMBENCH_DATA=$PHANTOMBENCH_DATA PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-all} ${PHANTOMBENCH_THREADS:+PHANTOMBENCH_THREADS=\"$PHANTOMBENCH_THREADS\"} ./phantombench scaling $*";;
   help|-h|--help)
      usage;;
   *)
