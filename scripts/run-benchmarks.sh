@@ -69,10 +69,12 @@ fi
 # preset variables
 #
 datetagiso=`date "+%Y-%m-%dT%H:%M:%S%z"`;
-difflog="diff-$label-$nthreads.log";
-codelog="code-$label-$nthreads.log";
-timelog="time-$label-$nthreads.log";
-evlog="ev-$label-$nthreads.log";
+# runs are tagged by the number of threads, or MPI tasks x threads, e.g. 8 or 4x16
+if [[ $MPI == "yes" ]]; then runtag=${NMPI:-4}x$nthreads; else runtag=$nthreads; fi
+difflog="diff-$label-$runtag.log";
+codelog="code-$label-$runtag.log";
+timelog="time-$label-$runtag.log";
+evlog="ev-$label-$runtag.log";
 makelog="make-$label.log";
 csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall,phantom_date"
 phantom_sha=`git -C $phantomdir rev-parse --short HEAD`;
@@ -275,7 +277,7 @@ run_code()
   if [ -e ${evfile} ]; then
      python3 $scriptdir/evcheck.py ${evfile} $src/CONSERVE $src/conservation.ref $refflag > $evlog;
      # keep the .ev file of each completed run, so it can be rechecked if tolerances change
-     if [ -e ${dumpout} ]; then cp ${evfile} saved-$label-$nthreads.ev; fi
+     if [ -e ${dumpout} ]; then cp ${evfile} saved-$label-$runtag.ev; fi
   fi
   # informational only: differences compared to reference dump
   if [ -e ${dumpout}.ref ] && [ -e ${dumpout} ]; then

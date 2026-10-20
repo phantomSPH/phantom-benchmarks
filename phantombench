@@ -63,6 +63,7 @@ usage()
 }
 
 # recheck conservation of the runs saved in runs/<bench>/<label>/saved-<label>-<nthreads>.ev
+# (or saved-<label>-<nmpi>x<nthreads>.ev for MPI runs)
 # against the current CONSERVE and conservation.ref, updating the status and conservation
 # errors of the latest result for that build and thread count
 recheck_runs()
@@ -72,16 +73,19 @@ recheck_runs()
      for evsaved in $rundir/$name/*/saved-*.ev; do
         [ -e "$evsaved" ] && [ -e $csvdir/$name.csv ] || continue;
         key=`basename $evsaved .ev`; key=${key#saved-};
-        nthreads=${key##*-}; lab=${key%-*}; csvfile=$csvdir/$name.csv;
+        nthreads=${key##*-}; lab=${key%-*}; csvfile=$csvdir/$name.csv; nmpi=1;
+        if [[ $nthreads == *x* ]]; then nmpi=${nthreads%x*}; nthreads=${nthreads#*x}; fi
         result=`python3 $scriptdir/evcheck.py $evsaved $topdir/benchmarks/$name/CONSERVE \
                 $topdir/benchmarks/$name/conservation.ref | grep RESULT`;
         status=`echo $result | awk '{print $2}'`; cons=`echo $result | awk '{print $3}' | tr ',' ';'`;
-        old=`awk -F, -v l="$lab" -v n="$nthreads" '$4==l && $7==n {s=$20} END {print s}' $csvfile`;
+        # rows written before the nmpi column was added have no MPI tasks recorded
+        match='$4==l && $7==n && ($8==m || ($8=="" && m==1))';
+        old=`awk -F, -v l="$lab" -v n="$nthreads" -v m="$nmpi" "$match {s=\$20} END {print s}" $csvfile`;
         # the file is read twice: first to find the last matching row, then to update it
-        awk -F, -v OFS=, -v l="$lab" -v n="$nthreads" -v s="$status" -v c="$cons" \
-            'NR==FNR { if ($4==l && $7==n) last=FNR; next } FNR==last { $20=s; $21=c } 1' \
+        awk -F, -v OFS=, -v l="$lab" -v n="$nthreads" -v m="$nmpi" -v s="$status" -v c="$cons" \
+            "NR==FNR { if ($match) last=FNR; next } FNR==last { \$20=s; \$21=c } 1" \
             $csvfile $csvfile > $csvfile.tmp && mv $csvfile.tmp $csvfile;
-        echo "$name ($lab, $nthreads threads): $old -> $status";
+        echo "$name ($lab, $nmpi x $nthreads): $old -> $status";
      done
   done
 }
