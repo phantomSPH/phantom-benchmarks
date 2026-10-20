@@ -121,7 +121,7 @@ get_compiler_version()
    # the compiler is the first word of the line following the "Fortran flags" line
    fc=`awk '/Fortran flags are/ { getline; print $1; exit }' $builddir/$makelog`;
    if [ -n "$fc" ]; then
-      $fc --version 2> /dev/null | head -1 | tr ',' ' ';
+      $fc --version 2> /dev/null | grep -m1 . | tr ',' ' ';
    else
       echo "unknown";
    fi

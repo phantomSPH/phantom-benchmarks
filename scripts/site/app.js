@@ -52,6 +52,11 @@ const isMpi = r => r.nmpi > 1 || r.label.endsWith('-mpi');
 const good = r => ok(r) && !isMpi(r);
 const hybrid = r => ok(r) && isMpi(r);
 // time per build (compiler) at full node on the latest phantom version, for one benchmark and machine
+// compiler with the version used in the latest run of that build on a machine, e.g. "gfortran 13.3.0"
+const withVersion = (m, lab) => {
+  const r = RUNS.filter(x => x.machine === m && x.label === lab && x.version).pop();
+  return r ? `${lab} <span class="note">${r.version}</span>` : lab;
+};
 const fullNodeTimes = (b, m) => new Map([...groupBy(RUNS.filter(r =>
   good(r) && r.bench === b && r.machine === m && r.threads === fullNode(m)), r => r.label)]
   .map(([lab, rs]) => [lab, latestTime(rs)]));
@@ -135,7 +140,7 @@ function overview() {
   const fastest = b => Math.min(...[...best.get(b).values()].filter(Boolean).map(x => x[1]));
   c.appendChild(table(['machine', ...benches()], machines().map(m => [mcell(m), ...benches().map(b => {
     const x = best.get(b).get(m);
-    return x ? `${fmt(x[1])} <span class="note">${x[0]}</span>` : ''; })]),
+    return x ? `${fmt(x[1])} <span class="note">${withVersion(m, x[0])}</span>` : ''; })]),
     machines().map(m => ['', ...benches().map(b => {
       const x = best.get(b).get(m);
       return x && x[1] === fastest(b) ? 'best' : ''; })])));
@@ -170,7 +175,7 @@ function findChanges(runs) {
 }
 function changeTable(changes) {
   return table(['benchmark', 'machine', 'build', 'threads', 'from', 'to', 'time (s)', 'change'],
-    changes.map(x => [x.key[0], mcell(x.key[1]), x.key[2], x.key[3], x.sha0, `<span title="${x.subject}">${x.sha1}</span>`,
+    changes.map(x => [x.key[0], mcell(x.key[1]), withVersion(x.key[1], x.key[2]), x.key[3], x.sha0, `<span title="${x.subject}">${x.sha1}</span>`,
                       `${fmt(x.t0)} → ${fmt(x.t1)}`, `${x.pct > 0 ? '+' : ''}${fmt(x.pct)}%`]),
     changes.map(x => [, , , , , , , x.pct > 0 ? 'worse' : 'best']));
 }
@@ -192,7 +197,7 @@ function compilerRanking() {
   const ordinal = i => ['1st', '2nd', '3rd'][i] || `${i + 1}th`;
   return table(['machine', ...[...Array(nmax).keys()].map(ordinal)],
     ranks.map(([m, st]) => [mcell(m), ...st.map(x =>
-      `${x.lab} <span class="note">${fmt(x.gm, 2)}, fastest on ${x.wins}/${x.n}</span>`)]),
+      `${withVersion(m, x.lab)} <span class="note">${fmt(x.gm, 2)}, fastest on ${x.wins}/${x.n}</span>`)]),
     ranks.map(([, st]) => ['', 'best']));
 }
 
@@ -216,7 +221,7 @@ function compilers() {
     const gm = rel.map(r => r.filter(Boolean).length ? geomean(r.filter(Boolean)) : null);
     const bestgm = Math.min(...gm.filter(Boolean));
     labels.forEach((lab, i) => {
-      rows.push([`${mcell(m)} · ${lab}`, ...rel[i].map(x => fmt(x, 2)), fmt(gm[i], 2)]);
+      rows.push([`${mcell(m)} · ${withVersion(m, lab)}`, ...rel[i].map(x => fmt(x, 2)), fmt(gm[i], 2)]);
       classes.push(['', ...rel[i].map(x => x === 1 ? 'best' : ''), gm[i] === bestgm ? 'best' : '']);
     });
   }
@@ -234,7 +239,7 @@ function compilers() {
     for (const m of ms) {
       const best = Math.min(...t.get(m).values());
       for (const [lab, x] of [...t.get(m)].sort((p, q) => p[1] - q[1])) {
-        rows.push([mcell(m), lab, fmt(x), fmt(x / best, 2)]);
+        rows.push([mcell(m), withVersion(m, lab), fmt(x), fmt(x / best, 2)]);
         classes.push(['', '', x === best ? 'best' : '', '']);
       }
     }
@@ -287,7 +292,7 @@ function hardware() {
     const bt = Math.min(...[...res.values()].map(x => x.t)), bcs = Math.min(...[...res.values()].map(x => x.cs));
     const rs = [...res];
     c.appendChild(table(['machine', 'compiler', 'time (s)', 'core-seconds'],
-      rs.map(([m, x]) => [mcell(m), x.lab, fmt(x.t), fmt(x.cs, 0)]),
+      rs.map(([m, x]) => [mcell(m), withVersion(m, x.lab), fmt(x.t), fmt(x.cs, 0)]),
       rs.map(([, x]) => ['', '', x.t === bt ? 'best' : '', x.cs === bcs ? 'best' : ''])));
   }
 }
@@ -395,7 +400,7 @@ function hybridSection(c, b, m) {
     .sort((p, q) => q.n * q.t - p.n * p.t || p.n - q.n);
   const bestAt = n => Math.min(...runs.filter(x => x.n * x.t === n).map(x => x.time));
   c.appendChild(table(['cores', 'MPI tasks × threads', 'build', 'time (s)', 'openMP only (s)'],
-    runs.map(x => [x.n * x.t, `${x.n} × ${x.t}`, x.lab, fmt(x.time), omp && omp[1].has(x.n * x.t) ? fmt(omp[1].get(x.n * x.t)) : '']),
+    runs.map(x => [x.n * x.t, `${x.n} × ${x.t}`, withVersion(m, x.lab), fmt(x.time), omp && omp[1].has(x.n * x.t) ? fmt(omp[1].get(x.n * x.t)) : '']),
     runs.map(x => ['', '', '', x.time === bestAt(x.n * x.t) ? 'best' : '', ''])));
 }
 

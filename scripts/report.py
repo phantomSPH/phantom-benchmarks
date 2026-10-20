@@ -19,6 +19,7 @@ import csv
 import html
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,8 +44,32 @@ def read_results(resultsdir, machines=None, benches=None):
             with open(os.path.join(mdir, fname)) as f:
                 for row in csv.DictReader(f):
                     row['bench'] = bench
+                    # builds are labelled by SYSTEM unless given their own label: show the compiler instead
+                    row['build'] = row['label']
+                    if row['label'] in (row['system'], row['system'] + '-mpi'):
+                        row['label'] = compiler_name(row) + row['label'][len(row['system']):]
                     rows.append(row)
     return rows
+
+
+def compiler_name(row):
+    """the Fortran compiler (FC) used for a run, from its version string, or SYSTEM if unknown"""
+    version = row.get('compiler', '')
+    for pattern, name in ((r'AOCC|flang', 'flang'), (r'^GNU Fortran', 'gfortran'), (r'^ifx', 'ifx'),
+                          (r'^ifort', 'ifort'), (r'nvfortran', 'nvfortran')):
+        if re.search(pattern, version):
+            return name
+    return row['system']
+
+
+def compiler_version(row):
+    """short compiler version, e.g. 13.3.0, or AOCC 5.1.0 for the AMD compilers"""
+    version = row.get('compiler', '')
+    aocc = re.search(r'AOCC_(\d+(?:\.\d+)+)', version)
+    if aocc:
+        return 'AOCC ' + aocc.group(1)
+    numbers = re.findall(r'\d+\.\d+(?:\.\d+)?', version)
+    return numbers[-1] if numbers else ''
 
 
 def fnum(x):
@@ -387,7 +412,7 @@ def compare(rows, base, head):
 def status_html(rows, label):
     """html table of the latest results for one build, in the format of the original nightly pages"""
     colours = {'red': '#FF0000', 'amber': '#FF6600', 'green': '#009900'}
-    last = latest([r for r in rows if r['label'] == label], lambda r: r['bench'])
+    last = latest([r for r in rows if r['build'] == label], lambda r: r['bench'])
     out = [f'<h2>Checking Phantom benchmarks, SYSTEM={html.escape(label)}</h2>']
     if last:
         r = list(last.values())[-1]
@@ -525,7 +550,7 @@ def site_data(rows, commits):
         sha = info['full'][:7] if info else r['phantom_sha'].replace('-dirty', '')
         runs.append({
             'machine': r['machine'], 'cpu': r['cpu'], 'bench': r['bench'], 'label': r['label'],
-            'compiler': r['compiler'], 'threads': int(r['nthreads']), 'nmpi': nmpi(r), 'sha': sha,
+            'compiler': r['compiler'], 'version': compiler_version(r), 'threads': int(r['nthreads']), 'nmpi': nmpi(r), 'sha': sha,
             'dirty': r['phantom_sha'].endswith('-dirty'), 'branch': r['phantom_branch'],
             'sha_date': info.get('date') or r.get('phantom_date') or r['date'],
             'subject': info.get('subject', ''), 'date': r['date'], 'npart': fnum(r['npart']),
