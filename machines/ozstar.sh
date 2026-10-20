@@ -5,7 +5,7 @@
 # compilers to benchmark, as phantom SYSTEMs (nt = aocc on the milan nodes)
 PHANTOMBENCH_SYSTEMS=${PHANTOMBENCH_SYSTEMS:-"nt gfortran ifx"}
 # modules to load in the job script for each SYSTEM
-modules_nt="aocc"
+modules_nt="aocc/4.0.0"
 modules_gfortran="gompi/2023a"
 modules_ifx="intel-compilers/2023.0.0"
 # whole milan node (2 x 32-core AMD EPYC 7543, 256 GB), with thread counts up to 64
