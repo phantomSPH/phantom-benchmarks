@@ -29,6 +29,7 @@ benchmarks/<name>/        inputs for each benchmark (no run output is written he
 scripts/                  run-benchmarks.sh, scaling.sh, evcheck.py, report.py, machine.sh
 results/<machine>/*.csv   results, one line per run (committed to the repository)
 runs/                     where the calculations are run, plus reports (not committed)
+machines/<name>.sh        settings for clusters (compilers, modules, queue)
 ```
 
 Commands:
@@ -40,7 +41,9 @@ Commands:
 | `phantombench compilers [bench...]` | runs once per compiler in `PHANTOMBENCH_SYSTEMS`, e.g. `PHANTOMBENCH_SYSTEMS="gfortran flang nvfortran"` |
 | `phantombench compare BASE HEAD` | compares two labelled builds, e.g. master vs a branch (see below) |
 | `phantombench report [--scaling] [--su ...]` | regenerates reports from stored results |
-| `phantombench qscript [bench...]` | writes a batch job script (via Phantom's `make qscript`) for a scaling test on an exclusive cluster node |
+| `phantombench submit [bench...]` | on a cluster: downloads the data and submits one scaling-test job per compiler (see below) |
+| `phantombench fetch [bench...]` | downloads and checks the data files only |
+| `phantombench qscript [bench...]` | writes the batch job script for one compiler (via Phantom's `make qscript`) |
 | `phantombench reference [bench...]` | regenerates the reference data for a benchmark (maintainers) |
 | `phantombench status` | writes an html summary of the latest results (used by `phantom/scripts/nightly.sh`) |
 | `phantombench site [dir]` | builds the website from all results |
@@ -110,15 +113,13 @@ This writes the following to `runs/reports/<machine>/`:
 - `scaling-hh48.pdf` / `.png` (log-log wall time against cpus, with ideal scaling);
 - with `--su NPART:NSTEPS:NCORES:NRUNS`, an estimate of the service units for a production campaign.
 
-On a cluster, write a job script with Phantom's `make qscript`. Each SYSTEM has its own queue settings, and the script requests an exclusive node:
+On a cluster, run all of the benchmarks with every compiler, with scaling tests on whole nodes, using
 
 ```
-SYSTEM=nt PHANTOMBENCH_MACHINE=ozstar-milan PHANTOMBENCH_QMODULES="gcc/13.3.0" \
-   ./phantombench qscript hh48 commonenv > bench.q
-sbatch bench.q
+./phantombench submit
 ```
 
-Then commit `results/ozstar-milan/*.csv` to add the results to the website.
+This downloads the data on the login node, then submits one job per compiler, each running a scaling test on an exclusive node. Job scripts are written with Phantom's `make qscript`. The settings for each cluster are in [machines/](machines/) (e.g. [machines/ozstar.sh](machines/ozstar.sh)): the compilers and the modules each one needs, the partition, cpus per node, thread counts, wall time and where to store the data. The file is chosen automatically from the login node's hostname. To add a cluster, copy one of these files. When the jobs have finished, commit `results/<machine>/*.csv` to add the results to the website.
 
 ## How to add benchmark problems to this suite
 

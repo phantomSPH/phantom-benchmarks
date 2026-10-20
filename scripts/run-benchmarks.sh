@@ -154,6 +154,8 @@ run_benchmark()
       log_failure "$msg"
    elif ! download_reference; then
       log_failure "could not download data files"
+   elif [[ "$PHANTOMBENCH_FETCH_ONLY" == "yes" ]]; then
+      end_group notice "data files for $name are in $datadir/$name";
    elif ! build_benchmark; then
       log_failure "failed to build (see $rundir/$name/$builddir/$makelog)"
    else

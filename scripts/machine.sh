@@ -42,9 +42,17 @@ get_nperfcores()
 # short machine name used to label results, overridable via PHANTOMBENCH_MACHINE
 get_machine_name()
 {
+  host=`hostname -s | tr '[:upper:]' '[:lower:]'`
   if [[ -n "$PHANTOMBENCH_MACHINE" ]]; then
-     echo "$PHANTOMBENCH_MACHINE"
-  else
-     hostname -s | tr '[:upper:]' '[:lower:]' | sed 's/[0-9]*$//'
+     echo "$PHANTOMBENCH_MACHINE"; return
   fi
+  # machines/<name>.sh files list the hostnames they apply to on a "# hosts:" line
+  for file in $(dirname "${BASH_SOURCE[0]}")/../machines/*.sh; do
+     [ -e "$file" ] || continue
+     # hostnames are matched ignoring case
+     for pattern in `grep -m1 '^# hosts:' $file | cut -d: -f2- | tr '[:upper:]' '[:lower:]'`; do
+        if [[ $host == $pattern ]]; then basename $file .sh; return; fi
+     done
+  done
+  echo $host | sed 's/[0-9]*$//'
 }

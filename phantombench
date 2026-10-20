@@ -9,14 +9,17 @@
 #   scaling [bench...]    strong scaling test over thread counts, then report
 #   compilers [bench...]  run benchmarks for each SYSTEM in PHANTOMBENCH_SYSTEMS
 #   compare BASE HEAD     compare timings between two result labels (e.g. for a PR)
+#   fetch [bench...]      download and check the data files, without building or running
+#                         (e.g. on a cluster login node, if compute nodes have no internet)
 #   reference [bench...]  rerun benchmarks and store reference data for conservation
 #                         checks, the reference dump and the .hashlist
 #   report [options]      write reports from the stored results (see scripts/report.py -h)
 #   status                write html summary of latest results (used by phantom's nightly.sh)
 #   site [dir]            build the static website from all stored results
-#   qscript [bench...]    write a batch job script (via phantom's make qscript) that runs
-#                         a scaling test on an exclusive node, e.g. on a cluster:
-#                         SYSTEM=nt PHANTOMBENCH_QMODULES="gcc" phantombench qscript polar > job.q
+#   submit [bench...]     on a cluster: download the data, then submit one job per compiler
+#                         in PHANTOMBENCH_SYSTEMS, each running a scaling test on an exclusive
+#                         node. Settings for known clusters are in machines/<name>.sh
+#   qscript [bench...]    write the batch job script for one compiler (via phantom's make qscript)
 #
 # With no command, runs the quick tier with sensible defaults for this machine.
 #
@@ -24,11 +27,15 @@ topdir=$(cd "$(dirname "$0")" && pwd)
 scriptdir=$topdir/scripts
 source "$scriptdir/machine.sh"
 
+# settings for known machines (compilers, modules, queue), see machines/*.sh
+export PHANTOMBENCH_MACHINE=$(get_machine_name)
+if [ -e $topdir/machines/$PHANTOMBENCH_MACHINE.sh ]; then source $topdir/machines/$PHANTOMBENCH_MACHINE.sh; fi
+
 # sensible defaults so the suite runs out-of-the-box on a new machine
 export SYSTEM=${SYSTEM:-gfortran}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-$(get_nperfcores)}
 export PHANTOM_DIR=${PHANTOM_DIR:-~/phantom}
-export PHANTOMBENCH_MACHINE=$(get_machine_name)
+export PHANTOMBENCH_DATA=${PHANTOMBENCH_DATA:-~/.cache/phantombench}
 export OMP_STACKSIZE=${OMP_STACKSIZE:-1024m}
 export OMP_SCHEDULE=${OMP_SCHEDULE:-dynamic}
 rundir=${PHANTOMBENCH_RUNDIR:-$topdir/runs}
@@ -37,7 +44,7 @@ report="python3 $scriptdir/report.py --results ${PHANTOMBENCH_RESULTS:-$topdir/r
 
 usage()
 {
-  sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//';
+  sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//';
 }
 
 command=${1:-run}
@@ -45,18 +52,24 @@ command=${1:-run}
 case "$command" in
   run)
      export PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-quick}
-     $scriptdir/run-benchmarks.sh "$@";
-     $report --machine $PHANTOMBENCH_MACHINE "$@";;
+     $scriptdir/run-benchmarks.sh "$@"; status=$?;
+     $report --machine $PHANTOMBENCH_MACHINE "$@";
+     exit $status;;
   scaling)
-     $scriptdir/scaling.sh "$@";
-     $report --machine $PHANTOMBENCH_MACHINE --scaling "$@";;
+     $scriptdir/scaling.sh "$@"; status=$?;
+     $report --machine $PHANTOMBENCH_MACHINE --scaling "$@";
+     exit $status;;
   compilers)
+     status=0;
      for system in ${PHANTOMBENCH_SYSTEMS:-gfortran}; do
-        SYSTEM=$system PHANTOMBENCH_LABEL=$system $scriptdir/run-benchmarks.sh "$@";
+        SYSTEM=$system PHANTOMBENCH_LABEL=$system $scriptdir/run-benchmarks.sh "$@" || status=1;
      done
-     $report --machine $PHANTOMBENCH_MACHINE "$@";;
+     $report --machine $PHANTOMBENCH_MACHINE "$@";
+     exit $status;;
   compare)
      $report --machine $PHANTOMBENCH_MACHINE --compare "$@";;
+  fetch)
+     PHANTOMBENCH_FETCH_ONLY=yes $scriptdir/run-benchmarks.sh "$@";;
   reference)
      RETURN_ERR=yes PHANTOMBENCH_UPDATE_REF=yes $scriptdir/run-benchmarks.sh "$@";;
   report)
@@ -67,12 +80,29 @@ case "$command" in
      echo "written to $rundir/opt-status-$label.html";;
   site)
      $report --site ${1:-$topdir/site};;
+  submit)
+     # download data on the login node, since compute nodes may not have internet access
+     export PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-all}
+     PHANTOMBENCH_FETCH_ONLY=yes RETURN_ERR=yes $scriptdir/run-benchmarks.sh "$@" > /dev/null || \
+        { echo "ERROR: could not download benchmark data"; exit 1; }
+     mkdir -p $rundir/jobs;
+     for system in ${PHANTOMBENCH_SYSTEMS:-$SYSTEM}; do
+        job=$rundir/jobs/phantombench-$system.q;
+        SYSTEM=$system PHANTOMBENCH_LABEL=$system $0 qscript "$@" > $job || exit 1;
+        echo -n "$system: ";
+        if command -v sbatch > /dev/null; then sbatch $job; else qsub $job; fi
+     done
+     echo "results will be written to results/$PHANTOMBENCH_MACHINE/";;
   qscript)
-     # job script running a scaling test on an exclusive node, via phantom's "make qscript"
-     make --no-print-directory -s -C $PHANTOM_DIR qscript SYSTEM=$SYSTEM OPENMP=yes \
+     # job script running a scaling test on an exclusive node, via phantom's "make qscript".
+     # Modules are from PHANTOMBENCH_QMODULES or modules_<SYSTEM> in the machine file;
+     # NOMP sets the cpus requested, otherwise the default for this SYSTEM in phantom
+     modules=modules_$SYSTEM;
+     make --no-print-directory -s -C $PHANTOM_DIR qscript SYSTEM=$SYSTEM OPENMP=yes ${NOMP:+NOMP=$NOMP} \
+          ${QPARTITION:+QPARTITION=$QPARTITION} ${QPROJECT:+QPROJECT=$QPROJECT} \
           QEXCLUSIVE=yes JOBNAME=phantombench-$label WALLTIME=${WALLTIME:-24:00:00} \
-          MAXMEM=${MAXMEM:-64G} QMODULES="$PHANTOMBENCH_QMODULES" MAILTO="$MAILTO" \
-          CMD="'cd $topdir && SYSTEM=$SYSTEM PHANTOMBENCH_LABEL=$label PHANTOM_DIR=$PHANTOM_DIR PHANTOMBENCH_MACHINE=$PHANTOMBENCH_MACHINE PHANTOMBENCH_MAKEFLAGS=\"$PHANTOMBENCH_MAKEFLAGS\" ./phantombench scaling $*'";;
+          MAXMEM=${MAXMEM:-64G} QMODULES="${PHANTOMBENCH_QMODULES:-${!modules}}" MAILTO="$MAILTO" \
+          CMD="cd $topdir && SYSTEM=$SYSTEM PHANTOMBENCH_LABEL=$label PHANTOM_DIR=$PHANTOM_DIR PHANTOMBENCH_MACHINE=$PHANTOMBENCH_MACHINE PHANTOMBENCH_MAKEFLAGS=\"$PHANTOMBENCH_MAKEFLAGS\" PHANTOMBENCH_DATA=$PHANTOMBENCH_DATA PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-all} ${PHANTOMBENCH_THREADS:+PHANTOMBENCH_THREADS=\"$PHANTOMBENCH_THREADS\"} ./phantombench scaling $*";;
   help|-h|--help)
      usage;;
   *)
