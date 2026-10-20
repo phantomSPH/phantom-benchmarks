@@ -7,8 +7,7 @@ PHANTOMBENCH_SYSTEMS=${PHANTOMBENCH_SYSTEMS:-"nt gfortran ifx"}
 modules_nt="aocc"
 modules_gfortran="gompi/2023a"
 modules_ifx="intel-compilers/2023.0.0"
-# whole milan node, all thread counts up to 64 cores; OzSTAR does not allow --exclusive,
-# so the whole node is obtained by requesting all of its cores
+# whole milan node (all 64 cores), with thread counts up to 64
 QPARTITION=${QPARTITION:-milan}
 NOMP=${NOMP:-64}
 QEXCLUSIVE=${QEXCLUSIVE:-no}

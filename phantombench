@@ -21,7 +21,7 @@
 #   publish               commit this machine's results and push them to GitHub,
 #                         which also updates the website (needs push access)
 #   submit [bench...]     on a cluster: download the data, then submit one job per compiler
-#                         in PHANTOMBENCH_SYSTEMS, each running a scaling test on an exclusive
+#                         in PHANTOMBENCH_SYSTEMS, each running a scaling test on a whole
 #                         node. Settings for known clusters are in machines/<name>.sh
 #   qscript [bench...]    write the batch job script for one compiler (via phantom's make qscript)
 #
@@ -142,13 +142,13 @@ case "$command" in
      if [ $nfail -gt 0 ]; then echo "ERROR: $nfail job(s) could not be submitted (scripts are in $rundir/jobs)"; exit 1; fi
      echo "results will be written to results/$PHANTOMBENCH_MACHINE/";;
   qscript)
-     # needs make qscript with CMD and QEXCLUSIVE support (phantom PR #900)
+     # needs a version of phantom whose make qscript can run a given command
      if ! grep -q QSCRIPT_CMD $PHANTOM_DIR/build/Makefile_qscripts 2> /dev/null; then
         echo "ERROR: phantom in $PHANTOM_DIR is too old for phantombench qscript/submit;" >&2
         echo "       update it (git pull) or set PHANTOM_DIR to a newer version" >&2
         exit 1
      fi
-     # job script running a scaling test on an exclusive node, via phantom's "make qscript".
+     # job script running a scaling test on a whole node, via phantom's "make qscript".
      # Modules are from PHANTOMBENCH_QMODULES or modules_<SYSTEM> in the machine file;
      # NOMP sets the cpus requested, otherwise the default for this SYSTEM in phantom
      modules=modules_$SYSTEM;

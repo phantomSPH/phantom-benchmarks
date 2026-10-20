@@ -58,8 +58,8 @@ machine=$(get_machine_name);
 builddir="build-$label";
 codebinary="./$builddir/phantom";
 release_url="https://github.com/phantomSPH/phantom-benchmarks/releases/download/data-v1"
-if [ ! -d $phantomdir ]; then
-   echo "ERROR: $phantomdir not found"; exit 1;
+if [ ! -e $phantomdir/scripts/writemake.sh ] || [ ! -d $phantomdir/build ]; then
+   echo "ERROR: phantom source not found in $phantomdir"; exit 1;
 else
    echo "Using phantom from $phantomdir";
 fi

@@ -55,6 +55,7 @@ jobs:
         env:
           BENCHMARKS: ${{ inputs.benchmarks }}
           TIER: ${{ inputs.tier || 'quick' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # benchmarks requested, or all those in the requested tier
           if [ -z "$BENCHMARKS" ]; then
@@ -64,8 +65,15 @@ jobs:
              done
           fi
           echo "benchmarks=$(echo $BENCHMARKS | jq -cR 'split(" ")')" >> $GITHUB_OUTPUT
-          # phantom versions, one job each per benchmark
-          echo "refs=$(echo $PHANTOM_REF | jq -cR 'split(" ")')" >> $GITHUB_OUTPUT
+          # phantom versions (branches, tags or abbreviated hashes) as full commit hashes, which is
+          # what the checkout needs, with the name given for each; one job each per benchmark
+          refs=""
+          for ref in $PHANTOM_REF; do
+             sha=$(gh api repos/danieljprice/phantom/commits/$ref --jq .sha) || \
+                { echo "::error::phantom version $ref not found"; exit 1; }
+             refs+="{\"name\":\"$ref\",\"sha\":\"$sha\"},"
+          done
+          echo "refs=[${refs%,}]" >> $GITHUB_OUTPUT
 
   bench:
     needs: list
@@ -74,7 +82,7 @@ jobs:
       matrix:
         bench: ${{ fromJson(needs.list.outputs.benchmarks) }}
         ref: ${{ fromJson(needs.list.outputs.refs) }}
-    name: ${{ matrix.bench }} (${{ matrix.ref }})
+    name: ${{ matrix.bench }} (${{ matrix.ref.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -88,10 +96,11 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: checkout phantom
+        id: phantom
         uses: actions/checkout@v7
         with:
           repository: danieljprice/phantom
-          ref: ${{ matrix.ref }}
+          ref: ${{ matrix.ref.sha }}
           path: phantom
 
       - name: free disk space for compilers
@@ -106,36 +115,36 @@ jobs:
       # one step per compiler, each installed just before it is used, since installing a
       # compiler can change the environment (e.g. LIBRARY_PATH) seen by those installed before it.
       # gfortran is already on the runner; same compiler mapping as phantom's build.yml.
-      # Later compilers run even if an earlier one fails (!cancelled)
+      # Later compilers run even if an earlier one fails (!cancelled), but only if phantom was checked out
       - name: gfortran
-        if: ${{ !cancelled() && contains(env.SYSTEMS, 'gfortran') }}
+        if: ${{ !cancelled() && steps.phantom.outcome == 'success' && contains(env.SYSTEMS, 'gfortran') }}
         run: SYSTEM=gfortran PHANTOMBENCH_LABEL=gfortran ./scripts/run-benchmarks.sh ${{ matrix.bench }}
 
       - name: install ifx
-        if: ${{ !cancelled() && contains(env.SYSTEMS, 'ifx') }}
+        if: ${{ !cancelled() && steps.phantom.outcome == 'success' && contains(env.SYSTEMS, 'ifx') }}
         uses: fortran-lang/setup-fortran@v1
         with:
           compiler: intel
       - name: ifx
-        if: ${{ !cancelled() && contains(env.SYSTEMS, 'ifx') }}
+        if: ${{ !cancelled() && steps.phantom.outcome == 'success' && contains(env.SYSTEMS, 'ifx') }}
         run: SYSTEM=ifx PHANTOMBENCH_LABEL=ifx ./scripts/run-benchmarks.sh ${{ matrix.bench }}
 
       - name: install aocc
-        if: ${{ !cancelled() && contains(env.SYSTEMS, 'aocc') }}
+        if: ${{ !cancelled() && steps.phantom.outcome == 'success' && contains(env.SYSTEMS, 'aocc') }}
         uses: fortran-lang/setup-fortran@v1
         with:
           compiler: aocc
       - name: aocc
-        if: ${{ !cancelled() && contains(env.SYSTEMS, 'aocc') }}
+        if: ${{ !cancelled() && steps.phantom.outcome == 'success' && contains(env.SYSTEMS, 'aocc') }}
         run: SYSTEM=aocc PHANTOMBENCH_LABEL=aocc ./scripts/run-benchmarks.sh ${{ matrix.bench }}
 
       - name: install nvfortran
-        if: ${{ !cancelled() && contains(env.SYSTEMS, 'nvfortran') }}
+        if: ${{ !cancelled() && steps.phantom.outcome == 'success' && contains(env.SYSTEMS, 'nvfortran') }}
         uses: fortran-lang/setup-fortran@v1
         with:
           compiler: nvidia-hpc
       - name: nvfortran
-        if: ${{ !cancelled() && contains(env.SYSTEMS, 'nvfortran') }}
+        if: ${{ !cancelled() && steps.phantom.outcome == 'success' && contains(env.SYSTEMS, 'nvfortran') }}
         run: SYSTEM=nvfortran PHANTOMBENCH_LABEL=nvfortran ./scripts/run-benchmarks.sh ${{ matrix.bench }}
 
       - name: summary

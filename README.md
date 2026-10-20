@@ -95,7 +95,7 @@ PHANTOM_DIR=~/phantom        PHANTOMBENCH_LABEL=mybranch ./phantombench run
 ./phantombench compare master mybranch
 ```
 
-On Phantom pull requests this happens automatically on a self-hosted runner if you tick "Run benchmarks" in the PR description, or a maintainer adds the `benchmark` label. See `.github/workflows/benchmark.yml` in Phantom.
+On Phantom pull requests this happens automatically on a GitHub-hosted runner if you tick "Run benchmarks" in the PR description, or a maintainer adds the `benchmark` label. The pull request and its base are run one after the other on the same machine, and the comparison is posted as a comment. See `.github/workflows/benchmark.yml` in Phantom.
 
 ## Website
 
@@ -121,6 +121,15 @@ To fill in the history for past versions, give a list of versions, e.g. the last
 gh workflow run benchmarks -R phantomSPH/phantom-benchmarks -f phantom_ref="$(git -C ~/phantom log --format=%h -10 main | xargs)"
 ```
 
+## Running regularly on a workstation
+
+To benchmark Phantom's main branch regularly on a machine of your own, use cron. For example, compare compilers every night except Sunday, and run scaling tests on Sundays (the two must not overlap, since they use the same run directories), publishing the results each time (`crontab -e`):
+```
+0 2 * * 1-6 bash -lc 'cd ~/phantom && git pull -q && cd ~/phantom-benchmarks && git pull -q && ./phantombench compilers; ./phantombench publish' > ~/phantombench-cron.log 2>&1
+0 2 * * 0   bash -lc 'cd ~/phantom && git pull -q && cd ~/phantom-benchmarks && git pull -q && ./phantombench scaling; ./phantombench publish' > ~/phantombench-cron.log 2>&1
+```
+`bash -lc` loads your login environment, so that compilers such as nvfortran are on the `PATH`. Settings for the machine (compilers, threads) come from its file in [machines/](machines/), and publishing needs push access (see `phantombench publish`).
+
 ## Scaling tests for computing time applications
 
 ```
@@ -141,7 +150,7 @@ On a cluster, run all of the benchmarks with every compiler, with scaling tests 
 ./phantombench submit
 ```
 
-This downloads the data on the login node, then submits one job per compiler, each running a scaling test on an exclusive node. Job scripts are written with Phantom's `make qscript`. The settings for each cluster are in [machines/](machines/) (e.g. [machines/ozstar.sh](machines/ozstar.sh)): the compilers and the modules each one needs, the partition, cpus per node, thread counts, wall time and where to store the data. The file is chosen automatically from the login node's hostname. To add a cluster, copy one of these files. When the jobs have finished, commit `results/<machine>/*.csv` to add the results to the website.
+This downloads the data on the login node, then submits one job per compiler, each running a scaling test on a whole node. Job scripts are written with Phantom's `make qscript`. The settings for each cluster are in [machines/](machines/) (e.g. [machines/ozstar.sh](machines/ozstar.sh)): the compilers and the modules each one needs, the partition, cpus per node, thread counts, wall time and where to store the data. The file is chosen automatically from the login node's hostname. To add a cluster, copy one of these files. When the jobs have finished, commit `results/<machine>/*.csv` to add the results to the website.
 
 ## How to add benchmark problems to this suite
 
