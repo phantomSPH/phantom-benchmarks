@@ -20,6 +20,8 @@ default_threads()
   echo "$list$ncores";
 }
 threads=${PHANTOMBENCH_THREADS:-$(default_threads)};
+# fastest (most threads) first, so a job that runs out of time still has the full-node results
+threads=`echo $threads | tr ' ' '\n' | sort -rn | xargs`;
 
 # pin threads to cores so timings are reproducible
 export OMP_PROC_BIND=${OMP_PROC_BIND:-close}

@@ -51,14 +51,14 @@ usage()
   sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//';
 }
 
-# recheck conservation of the runs saved in runs/<bench>/saved-<label>-<nthreads>.ev
+# recheck conservation of the runs saved in runs/<bench>/<label>/saved-<label>-<nthreads>.ev
 # against the current CONSERVE and conservation.ref, updating the status and conservation
 # errors of the latest result for that build and thread count
 recheck_runs()
 {
   csvdir=${PHANTOMBENCH_RESULTS:-$topdir/results}/$PHANTOMBENCH_MACHINE;
   for name in ${@:-`ls $rundir`}; do
-     for evsaved in $rundir/$name/saved-*.ev; do
+     for evsaved in $rundir/$name/*/saved-*.ev; do
         [ -e "$evsaved" ] && [ -e $csvdir/$name.csv ] || continue;
         key=`basename $evsaved .ev`; key=${key#saved-};
         nthreads=${key##*-}; lab=${key%-*}; csvfile=$csvdir/$name.csv;

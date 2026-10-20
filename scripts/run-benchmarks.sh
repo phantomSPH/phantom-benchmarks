@@ -7,7 +7,7 @@
 # Usage: run-benchmarks.sh [list of benchmarks]
 #
 # Benchmark inputs are read from benchmarks/<name>, the calculations are run in
-# runs/<name> and one line per run is appended to results/<machine>/<name>.csv
+# runs/<name>/<label> and one line per run is appended to results/<machine>/<name>.csv
 #
 # Required environment variables:
 #   SYSTEM                  phantom SYSTEM (compiler) to build with, e.g. gfortran
@@ -149,7 +149,10 @@ run_benchmark()
    name=$1;
    src=$srcdir/$name;
    start_group "${name} benchmark with $label, $nthreads threads"
-   mkdir -p $rundir/$name; cd $rundir/$name;
+   # a separate directory for each build, so that runs with different compilers
+   # (e.g. simultaneous jobs on a cluster) do not overwrite each other's files
+   workdir=$rundir/$name/$label;
+   mkdir -p $workdir; cd $workdir;
    rm -f $difflog $codelog $timelog $evlog;
    msg=`check_benchmark_dir`
    if [ "X$msg" != "X" ]; then
@@ -159,7 +162,7 @@ run_benchmark()
    elif [[ "$PHANTOMBENCH_FETCH_ONLY" == "yes" ]]; then
       end_group notice "data files for $name are in $datadir/$name";
    elif ! build_benchmark; then
-      log_failure "failed to build (see $rundir/$name/$builddir/$makelog)"
+      log_failure "failed to build (see $workdir/$builddir/$makelog)"
    else
       make_initial_conditions
       echo "Running ${name} benchmark with $nthreads threads..."
@@ -368,9 +371,9 @@ parse_results()
   if [ ! -s $codelog ]; then
      log_failure "no output";
   elif [ ! -e ${dumpout} ]; then
-     log_failure "did not complete (see $rundir/$name/$codelog)";
+     log_failure "did not complete (see $workdir/$codelog)";
   elif [ "$status" != "pass" ] && [ "$status" != "improved" ]; then
-     log_failure "conservation worse than reference (see $rundir/$name/$evlog)";
+     log_failure "conservation worse than reference (see $workdir/$evlog)";
   else
      cpuwall=`awk -v c=$cputime -v w=$wall 'BEGIN { if (w > 0) printf "%.1f", c/w }'`;
      # time for the calculation from phantom's clock (excludes reading the dump and initial

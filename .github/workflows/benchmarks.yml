@@ -158,8 +158,8 @@ jobs:
         with:
           name: logs-${{ matrix.bench }}-${{ strategy.job-index }}
           path: |
-            runs/${{ matrix.bench }}/*.log
-            runs/${{ matrix.bench }}/build-*/make-*.log
+            runs/${{ matrix.bench }}/*/*.log
+            runs/${{ matrix.bench }}/*/build-*/make-*.log
 
   commit:
     needs: bench
