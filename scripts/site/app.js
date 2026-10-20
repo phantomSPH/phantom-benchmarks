@@ -123,18 +123,18 @@ function newChart(canvas, config) {
 function overview() {
   const c = content();
   section(c, 'fastest', 'Fastest time for each benchmark (s), full node, latest Phantom version');
-  const rows = [], classes = [];
-  for (const b of benches()) {
-    const cells = machines().map(m => {
-      const t = [...fullNodeTimes(b, m)];
-      return t.length ? t.reduce((a, x) => x[1] < a[1] ? x : a) : null;
-    });
-    const best = Math.min(...cells.filter(Boolean).map(x => x[1]));
-    rows.push([b, ...cells.map(x => x ? `${fmt(x[1])} <span class="note">${x[0]}</span>` : '')]);
-    classes.push(['', ...cells.map(x => x && x[1] === best ? 'best' : '')]);
-  }
-  c.appendChild(table(['benchmark', ...machines().map(m => `${cpuName(m)}<br><span class="note" title="${m}">${fullNode(m)} cores</span>`)],
-                      rows, classes));
+  // fastest compiler and its time for each benchmark (columns) on each machine (rows)
+  const best = new Map(benches().map(b => [b, new Map(machines().map(m => {
+    const t = [...fullNodeTimes(b, m)];
+    return [m, t.length ? t.reduce((a, x) => x[1] < a[1] ? x : a) : null];
+  }))]));
+  const fastest = b => Math.min(...[...best.get(b).values()].filter(Boolean).map(x => x[1]));
+  c.appendChild(table(['machine', ...benches()], machines().map(m => [mcell(m), ...benches().map(b => {
+    const x = best.get(b).get(m);
+    return x ? `${fmt(x[1])} <span class="note">${x[0]}</span>` : ''; })]),
+    machines().map(m => ['', ...benches().map(b => {
+      const x = best.get(b).get(m);
+      return x && x[1] === fastest(b) ? 'best' : ''; })])));
   c.appendChild(el('p', '<span class="note">Each cell shows the best compiler on that machine. ' +
     'See the Compilers and Hardware tabs for the full comparison, and the per-machine reports: ' +
     machines().map(m => `<a href="${m}/report.html">${m}</a>`).join(', ') + '.</span>'));
