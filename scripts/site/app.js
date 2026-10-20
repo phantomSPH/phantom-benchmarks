@@ -18,7 +18,8 @@ const colour = i => PALETTE[i % PALETTE.length];
 const el = (tag, html) => { const e = document.createElement(tag); if (html != null) e.innerHTML = html; return e; };
 const content = () => document.getElementById('content');
 const benches = () => uniq(RUNS.map(r => r.bench));
-const machines = () => uniq(RUNS.map(r => r.machine));
+// machines with the most cores first, then by name
+const machines = () => uniq(RUNS.map(r => r.machine)).sort((a, b) => fullNode(b) - fullNode(a) || a.localeCompare(b));
 
 function groupBy(runs, key) {
   const g = new Map();
@@ -42,6 +43,9 @@ function latestTime(runs) {
   const sha = latestSha(runs);
   return median(runs.filter(r => r.sha === sha).map(r => r.time));
 }
+// runs ordered by machine (most cores first), then build, so that series appear in that order
+const byMachine = runs => [...runs].sort((p, q) =>
+  machines().indexOf(p.machine) - machines().indexOf(q.machine) || p.label.localeCompare(q.label));
 const good = r => r.status !== 'fail' && r.time > 0 && !r.dirty;
 // time per build (compiler) at full node on the latest phantom version, for one benchmark and machine
 const fullNodeTimes = (b, m) => new Map([...groupBy(RUNS.filter(r =>
@@ -259,7 +263,7 @@ function hardware() {
     return { m, n: node.length, node: node.length ? geomean(node) : null, core: core.length ? geomean(core) : null };
   });
   const bn = Math.min(...stats.map(s => s.node).filter(Boolean)), bc = Math.min(...stats.map(s => s.core).filter(Boolean));
-  const sorted = stats.sort((p, q) => p.node - q.node);
+  const sorted = stats;
   c.appendChild(table(['machine', 'time per node', 'cost per core', 'benchmarks'],
     sorted.map(s => [mcell(s.m), fmt(s.node, 2), fmt(s.core, 2), s.n]),
     sorted.map(s => ['', s.node === bn ? 'best' : '', s.core === bc ? 'best' : '', ''])));
@@ -277,7 +281,7 @@ function hardware() {
                    scales: { x: axisStyle({ title: { display: false } }), y: axisStyle({ title: { display: false } }) } } });
     }
     const bt = Math.min(...[...res.values()].map(x => x.t)), bcs = Math.min(...[...res.values()].map(x => x.cs));
-    const rs = [...res].sort((p, q) => p[1].t - q[1].t);
+    const rs = [...res];
     c.appendChild(table(['machine', 'compiler', 'time (s)', 'core-seconds'],
       rs.map(([m, x]) => [mcell(m), x.lab, fmt(x.t), fmt(x.cs, 0)]),
       rs.map(([, x]) => ['', '', x.t === bt ? 'best' : '', x.cs === bcs ? 'best' : ''])));
@@ -377,7 +381,7 @@ function historyTab() {
                     x2: axisStyle({ type: 'category', labels: shas.map(dateOf), position: 'top', grid: { display: false },
                                     title: axisTitle('date') }) };
     const datasets = [];
-    [...groupBy(rs, r => `${mlabel(r.machine)}, ${r.label}`)].sort().forEach(([name, x], i) => {
+    [...groupBy(byMachine(rs), r => `${mlabel(r.machine)}, ${r.label}`)].forEach(([name, x], i) => {
       // every run as a point, and a line through the median of each version
       datasets.push({ label: '_' + name, type: 'scatter', backgroundColor: colour(i), pointRadius: 3,
                       data: x.map(r => ({ x: r.sha, y: r.time, subject: r.subject })) });
@@ -393,7 +397,7 @@ function historyTab() {
                    afterLabel: ctx => ctx.raw.subject || '' } } } } });
     // parallel efficiency at full node by version, where runs at more than one thread count exist
     const eff = [];
-    for (const [name, x] of groupBy(RUNS.filter(r => good(r) && r.bench === b), r => `${cpuName(r.machine)}, ${r.label}`)) {
+    for (const [name, x] of groupBy(byMachine(RUNS.filter(r => good(r) && r.bench === b)), r => `${cpuName(r.machine)}, ${r.label}`)) {
       const pts = [];
       for (const [sha, rr] of groupBy(x, r => r.sha)) {
         const n = [...new Set(rr.map(r => r.threads))].sort((p, q) => p - q);
