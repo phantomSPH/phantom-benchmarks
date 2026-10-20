@@ -36,7 +36,10 @@ source "$scriptdir/machine.sh"
 
 # settings for known machines (compilers, modules, queue), see machines/*.sh
 export PHANTOMBENCH_MACHINE=$(get_machine_name)
-if [ -e $topdir/machines/$PHANTOMBENCH_MACHINE.sh ]; then source $topdir/machines/$PHANTOMBENCH_MACHINE.sh; fi
+# (set -a exports them all, so that they also apply to the scripts run from here)
+if [ -e $topdir/machines/$PHANTOMBENCH_MACHINE.sh ]; then
+   set -a; source $topdir/machines/$PHANTOMBENCH_MACHINE.sh; set +a;
+fi
 
 # sensible defaults so the suite runs out-of-the-box on a new machine
 export SYSTEM=${SYSTEM:-gfortran}
