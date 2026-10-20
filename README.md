@@ -97,11 +97,28 @@ PHANTOM_DIR=~/phantom        PHANTOMBENCH_LABEL=mybranch ./phantombench run
 
 On Phantom pull requests this happens automatically on a self-hosted runner if you tick "Run benchmarks" in the PR description, or a maintainer adds the `benchmark` label. See `.github/workflows/benchmark.yml` in Phantom.
 
+## Website
+
+The [website](https://phantomsph.github.io/phantom-benchmarks/) is rebuilt from the results in `results/` whenever they change. Its tabs answer:
+
+- **Overview:** the fastest time for each benchmark on each machine, and any recent change of more than 5% in speed;
+- **Compilers:** the fastest compiler for a benchmark on each machine, or overall (geometric mean over benchmarks);
+- **Hardware:** the best hardware for a benchmark, or in general, compared both by time on a whole node and by cost per core (core-seconds);
+- **Scaling:** strong scaling of one benchmark across machines, or of all benchmarks on one machine, with the time spent in each routine (tree, density, force, other, startup). Figures and LaTeX tables for computing time applications can be downloaded from this tab;
+- **History:** time and parallel efficiency against Phantom version, in the order of the commits, with the date on the top axis. Repeated runs of the same version show the spread between runs.
+
+To build it locally, use `./phantombench site` and open `site/index.html` through a web server (e.g. `cd site && python3 -m http.server`). `PHANTOM_DIR` should be a Phantom git checkout, which is used to put the versions in order. Generated files are never committed.
+
 ## Benchmarks on GitHub Actions
 
 The [benchmarks workflow](.github/workflows/benchmarks.yml) runs the quick benchmarks on GitHub-hosted runners after every push to Phantom's main branch. It runs one job per benchmark, and each job builds and runs every compiler (gfortran, ifx, aocc and nvfortran) in turn on the same machine. Results are committed to `results/github-ubuntu/` and the website is updated. These are shared virtual machines with 4 cores and varying cpus, so the results check correctness and compare compilers, but are not precise timings. To run it by hand, e.g. on a branch:
 ```
 gh workflow run benchmarks -R phantomSPH/phantom-benchmarks -f phantom_ref=mybranch -f systems="gfortran ifx"
+```
+
+To fill in the history for past versions, give a list of versions, e.g. the last 10 on main (one job per version and benchmark):
+```
+gh workflow run benchmarks -R phantomSPH/phantom-benchmarks -f phantom_ref="$(git -C ~/phantom log --format=%h -10 main | xargs)"
 ```
 
 ## Scaling tests for computing time applications

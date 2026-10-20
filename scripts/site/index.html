@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phantom benchmarks</title>
+<!-- page for the Phantom benchmark suite; content is drawn by app.js from data.json -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --panel: #f6f6f8;
+  --accent: #0b6bcb; --good: #1a7f37; --bad: #c62828;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #16171a; --fg: #ececf0; --muted: #a0a0a8; --line: #34353b; --panel: #1f2024;
+    --accent: #5aa9ff; --good: #4cc26a; --bad: #ff6b6b;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #16171a; --fg: #ececf0; --muted: #a0a0a8; --line: #34353b; --panel: #1f2024;
+  --accent: #5aa9ff; --good: #4cc26a; --bad: #ff6b6b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header, main { max-width: 1100px; margin: auto; padding: 0 16px; }
+header { padding-top: 16px; }
+h1 { font-size: 1.5em; margin: 0.2em 0; }
+h2 { font-size: 1.15em; margin: 1.4em 0 0.4em; }
+a { color: var(--accent); }
+.sub { color: var(--muted); margin: 0 0 0.8em; }
+nav { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+nav button { background: none; border: none; color: var(--muted); font: inherit;
+             padding: 8px 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+nav button.active { color: var(--fg); border-bottom-color: var(--accent); }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 12px 0; }
+.controls label { color: var(--muted); }
+select { background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+         border-radius: 6px; padding: 4px 6px; font: inherit; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.chart { position: relative; height: 360px; background: var(--panel); border-radius: 8px; padding: 8px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; margin: 8px 0; font-variant-numeric: tabular-nums; }
+th, td { border-bottom: 1px solid var(--line); padding: 4px 10px; text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 600; }
+td.best { color: var(--good); font-weight: 600; }
+td.worse { color: var(--bad); }
+.note { color: var(--muted); font-size: 0.9em; }
+footer { color: var(--muted); font-size: 0.85em; padding: 24px 16px; max-width: 1100px; margin: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Phantom benchmarks</h1>
+  <p class="sub">Performance of the <a href="https://github.com/danieljprice/phantom">Phantom</a> SPH code
+    across compilers, hardware and versions.
+    Source and raw data: <a href="https://github.com/phantomSPH/phantom-benchmarks">phantom-benchmarks</a>.</p>
+  <nav id="tabs">
+    <button data-tab="overview">Overview</button>
+    <button data-tab="compilers">Compilers</button>
+    <button data-tab="hardware">Hardware</button>
+    <button data-tab="scaling">Scaling</button>
+    <button data-tab="history">History</button>
+  </nav>
+</header>
+<main id="content"></main>
+<footer>Times are Phantom's own wall time for the calculation, excluding reading the initial dump
+  and computing the initial derivatives. "Full node" means the largest number of threads run on that machine.</footer>
+<script src="app.js"></script>
+</body>
+</html>

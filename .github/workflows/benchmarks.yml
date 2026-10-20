@@ -8,13 +8,15 @@ name: benchmarks
 # check correctness and compare compilers, but are not precise timings.
 #
 # Triggered manually, or by phantom (danieljprice/phantom) on every push to main via a
-# repository_dispatch event of type "phantom-push" with client_payload.sha
+# repository_dispatch event of type "phantom-push" with client_payload.sha. Run manually with a
+# list of phantom versions to fill in the history of past versions, e.g.
+#   gh workflow run benchmarks -f phantom_ref="$(git -C ~/phantom log --format=%h -10 main | xargs)"
 
 on:
   workflow_dispatch:
     inputs:
       phantom_ref:
-        description: 'phantom branch, tag or commit to benchmark'
+        description: 'phantom versions to benchmark (branches, tags or commits, separated by spaces)'
         default: 'main'
       systems:
         description: 'phantom SYSTEMs (compilers) to test'
@@ -46,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       benchmarks: ${{ steps.list.outputs.benchmarks }}
+      refs: ${{ steps.list.outputs.refs }}
     steps:
       - uses: actions/checkout@v7
       - id: list
@@ -61,6 +64,8 @@ jobs:
              done
           fi
           echo "benchmarks=$(echo $BENCHMARKS | jq -cR 'split(" ")')" >> $GITHUB_OUTPUT
+          # phantom versions, one job each per benchmark
+          echo "refs=$(echo $PHANTOM_REF | jq -cR 'split(" ")')" >> $GITHUB_OUTPUT
 
   bench:
     needs: list
@@ -68,7 +73,8 @@ jobs:
       fail-fast: false
       matrix:
         bench: ${{ fromJson(needs.list.outputs.benchmarks) }}
-    name: ${{ matrix.bench }}
+        ref: ${{ fromJson(needs.list.outputs.refs) }}
+    name: ${{ matrix.bench }} (${{ matrix.ref }})
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -85,7 +91,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: danieljprice/phantom
-          ref: ${{ env.PHANTOM_REF }}
+          ref: ${{ matrix.ref }}
           path: phantom
 
       - name: free disk space for compilers
@@ -142,7 +148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: results-${{ matrix.bench }}
+          name: results-${{ matrix.bench }}-${{ strategy.job-index }}
           path: ${{ env.PHANTOMBENCH_RESULTS }}
           if-no-files-found: ignore
 
@@ -150,7 +156,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: logs-${{ matrix.bench }}
+          name: logs-${{ matrix.bench }}-${{ strategy.job-index }}
           path: |
             runs/${{ matrix.bench }}/*.log
             runs/${{ matrix.bench }}/build-*/make-*.log

@@ -9,14 +9,18 @@ Examples:
   report.py --machine gb10 --scaling polar      strong scaling tables, figure and text
   report.py --machine gb10 --compare base head  markdown comparison of two labels (PRs)
   report.py --machine gb10 --status-html gfortran  html summary in the old nightly format
-  report.py --site site/                        static website from all results
+  report.py --site site/ --phantom ~/phantom    static website from all results, with the
+                                                phantom commit history used to order them
   report.py --machine ozstar --scaling polar --su 2e6:5e4:48:20
       estimate kSU for 20 runs of 2e6 particles for 5e4 steps on 48 cores
 """
 import argparse
 import csv
 import html
+import json
 import os
+import shutil
+import subprocess
 import sys
 from collections import defaultdict
 
@@ -222,13 +226,14 @@ def scaling_tables(data):
     return header, body
 
 
-def latex_table(data, bench, machine, npart):
+def latex_table(data, bench, machine, npart, colname=None):
     """LaTeX table of wall times in the style used in computing time applications"""
+    colname = colname or (lambda lab: f'{machine} ({lab})')
     labels = sorted(data)
     threads = sorted({n for d in data.values() for n in d})
     lines = [r'\begin{table}', r'\centering',
              r'\begin{tabular}{r' + 'r' * len(labels) + '}', r'\hline',
-             'OMP threads & ' + ' & '.join(f'{machine} ({lab})' for lab in labels) + r' \\',
+             'OMP threads & ' + ' & '.join(colname(lab) for lab in labels) + r' \\',
              r'\hline']
     for n in threads:
         lines.append(f'{n} & ' + ' & '.join(f'{data[lab][n]:.1f}' if n in data[lab] else ''
@@ -282,27 +287,37 @@ def pyplot():
         return None
 
 
-def plot_vs_threads(series, title, filebase):
-    """log-log plot of time against number of threads for each series, with ideal scaling"""
+def paper_plot(series, kind, title, filebase):
+    """log-log plot against number of cpus in the style of the phantom paper (Price et al. 2018):
+    black lines with open circles, each labelled at its end, and dotted lines for ideal scaling.
+    kind is 'time' (wall time) or 'speedup' (relative to one cpu, assuming ideal scaling below
+    the smallest number of cpus measured)"""
     plt = pyplot()
     if plt is None:
         return []
-    fig, ax = plt.subplots(figsize=(5, 4))
-    threads = sorted({n for d in series.values() for n in d})
+    fig, ax = plt.subplots(figsize=(5.5, 4.2))
+    nmax = max(max(d) for d in series.values() if d)
+    xideal = [0.8, 1.5 * nmax]
     for name, times in series.items():
-        n = [i for i in sorted(times) if times[i] > 0]
+        n = [i for i in sorted(times) if times[i] and times[i] > 0]
         if not n:
             continue
-        line, = ax.plot(n, [times[i] for i in n], 'o-', label=name)
-        ax.plot(n, [times[n[0]] * n[0] / i for i in n], ':', color=line.get_color())
-    ax.set_xscale('log', base=2)
+        t0 = times[n[0]] * n[0]
+        y = [times[i] for i in n] if kind == 'time' else [t0 / times[i] for i in n]
+        ax.plot(n, y, 'k-', marker='o', mfc='none', ms=6, lw=1)
+        ax.annotate(name, (n[-1], y[-1]), xytext=(6, 0), textcoords='offset points',
+                    va='center', fontsize=9)
+        if kind == 'time':
+            ax.plot(xideal, [t0 / x for x in xideal], 'k:', lw=0.8)
+    if kind == 'speedup':
+        ax.plot(xideal, xideal, 'k:', lw=0.8)
+    ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_xticks(threads)
-    ax.set_xticklabels([str(n) for n in threads])
-    ax.set_xlabel('number of cpus (openMP threads)')
-    ax.set_ylabel('wall time (s)')
-    ax.set_title(title)
-    ax.legend(frameon=False, fontsize='small')
+    ax.set_xlim(xideal[0], 4. * nmax)
+    ax.xaxis.set_major_formatter('{x:g}')
+    ax.set_xlabel('Ncpus')
+    ax.set_ylabel('Wall Time (s)' if kind == 'time' else 'Speedup')
+    ax.text(0.96, 0.96, title, transform=ax.transAxes, ha='right', va='top')
     fig.tight_layout()
     files = [filebase + ext for ext in ('.pdf', '.png')]
     for f in files:
@@ -312,39 +327,10 @@ def plot_vs_threads(series, title, filebase):
 
 
 def scaling_plot(data, bench, machine, filebase):
-    """wall time against number of threads for each build"""
-    series = {f'{machine} ({lab})': data[lab] for lab in sorted(data)}
-    return plot_vs_threads(series, f'{bench}: strong scaling', filebase)
-
-
-def history_chart(rows, bench, subtitle):
-    """interactive google chart of wall time vs date for each build, as in the original nightly pages"""
-    series = defaultdict(dict)
-    for r in rows:
-        if r['bench'] == bench and r['status'] != 'fail' and run_time(r):
-            series[f"{r['machine']}-{r['label']}-{r['nthreads']}"][r['date'][:19]] = run_time(r)
-    if not series:
-        return ''
-    keys = sorted(series)
-    datarows = []
-    for date in sorted({d for s in series.values() for d in s}):
-        y, mo, d, h, mi, sec = (int(x) for x in date.replace('T', '-').replace(':', '-').split('-'))
-        vals = ','.join(str(series[k].get(date, 'null')) for k in keys)
-        datarows.append(f'    [new Date({y},{mo - 1},{d},{h},{mi},{sec}),{vals}],')
-    cols = '\n'.join(f"      data.addColumn('number', '{k}');" for k in keys)
-    return (f'<div id="{bench}" style="width: 900px; height: 500px"></div>\n'
-            '<script type="text/javascript">\n'
-            '    google.charts.setOnLoadCallback(function() {\n'
-            '      var data = new google.visualization.DataTable();\n'
-            "      data.addColumn('date', 'Date');\n"
-            f'{cols}\n      data.addRows([\n' + '\n'.join(datarows) + '\n      ]);\n'
-            # classic line chart, since it shows points, so series with a single run are visible
-            f"      var options = {{ title: 'Benchmark timings for {bench} test ({subtitle})', "
-            "vAxis: { title: 'wall time (s)', viewWindow: { min: 0 } }, pointSize: 5, interpolateNulls: true, "
-            "width: 900, height: 500 };\n"
-            f"      var chart = new google.visualization.LineChart(document.getElementById('{bench}'));\n"
-            '      chart.draw(data, options);\n'
-            '    });\n</script>')
+    """wall time and speedup against number of cpus for each build on one machine"""
+    title = f'{bench} (strong scaling) - {machine}'
+    return (paper_plot(data, 'time', title, filebase) +
+            paper_plot(data, 'speedup', title, filebase.replace('scaling-', 'speedup-', 1)))
 
 
 def compare(rows, base, head):
@@ -409,7 +395,6 @@ def write_report(rows, outdir, machine, do_scaling, su):
         htm += ['<h2>Where the time goes (% of wall time)</h2>', html_table(bheader, bbody)]
         print('\nWhere the time goes (% of wall time)\n' + markdown_table(bheader, bbody))
     for bench in sorted({r['bench'] for r in rows}):
-        htm.append(history_chart(rows, bench, f'Performed on {machine}'))
         if not do_scaling:
             continue
         data, ref = scaling_data(rows, bench)
@@ -436,8 +421,8 @@ def write_report(rows, outdir, machine, do_scaling, su):
             if len(rdata.get('tree', {})) < 2:
                 continue
             rheader, rbody = routine_table(rdata)
-            rfigs = plot_vs_threads({k: rdata[k] for k in ROUTINES}, f'{bench} ({lab}): time per routine',
-                                    os.path.join(outdir, f'scaling-{bench}-{lab}-routines'))
+            rfigs = paper_plot({k: rdata[k] for k in ROUTINES}, 'time', f'{bench} ({lab}) - {machine}',
+                               os.path.join(outdir, f'scaling-{bench}-{lab}-routines'))
             md += ['', f'### Time per routine: {bench} ({lab})', '', markdown_table(rheader, rbody)]
             htm += [f'<h3>Time per routine: {bench} ({lab})</h3>', html_table(rheader, rbody)]
             htm += [f'<img src="{os.path.basename(f)}">' for f in rfigs if f.endswith('.png')]
@@ -450,12 +435,10 @@ def write_report(rows, outdir, machine, do_scaling, su):
 
 
 def page(title, body, home='../index.html'):
-    """standalone html page with google charts and navigation links, as in the original nightly pages"""
+    """standalone html page with navigation links"""
     return ('<html>\n<head>\n<meta charset="utf-8">\n'
             f'<title>{html.escape(title)}</title>\n'
-            '<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>\n'
-            "<script type=\"text/javascript\">google.charts.load('current', {'packages':['corechart']});</script>\n"
-            '<style>table{border-collapse:collapse;margin:1em 0}td,th{border:1px solid #ccc;'
+            '<style>body{font-family:sans-serif;max-width:1000px;margin:auto;padding:1em}table{border-collapse:collapse;margin:1em 0}td,th{border:1px solid #ccc;'
             'padding:3px 8px;text-align:right}img{max-width:900px}</style>\n'
             '</head><body>\n'
             '<p>[<a href="https://phantomsph.github.io/">Phantom home</a>] '
@@ -463,26 +446,97 @@ def page(title, body, home='../index.html'):
             f'{body}\n</body></html>\n')
 
 
-def write_site(resultsdir, sitedir):
-    """static website with a report for each machine and an index page"""
+def read_commits(phantomdir):
+    """date and subject of each commit in a phantom git checkout, keyed by full hash"""
+    if not phantomdir:
+        return {}
+    try:
+        out = subprocess.run(['git', '-C', phantomdir, 'log', '--all', '--format=%H|%cI|%s'],
+                             capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        print(f'could not read the history of {phantomdir}')
+        return {}
+    commits = {}
+    for line in out.splitlines():
+        sha, date, subject = line.split('|', 2)
+        commits[sha] = {'date': date, 'subject': subject}
+    return commits
+
+
+def commit_info(sha, commits):
+    """full hash, date and subject for an abbreviated hash, if known"""
+    if not sha:
+        return {}
+    if not commits.get('_prefix'):
+        # index by the first 7 characters, the shortest abbreviation used
+        commits['_prefix'] = defaultdict(list)
+        for full in list(commits):
+            if full != '_prefix':
+                commits['_prefix'][full[:7]].append(full)
+    for full in commits['_prefix'].get(sha[:7], []):
+        if full.startswith(sha):
+            return dict(commits[full], full=full)
+    return {}
+
+
+def site_data(rows, commits):
+    """compact list of runs for the interactive website"""
+    runs = []
+    for r in rows:
+        info = commit_info(r['phantom_sha'].replace('-dirty', ''), commits)
+        # the same abbreviation for each version, whatever length git chose on each machine
+        sha = info['full'][:7] if info else r['phantom_sha'].replace('-dirty', '')
+        runs.append({
+            'machine': r['machine'], 'cpu': r['cpu'], 'bench': r['bench'], 'label': r['label'],
+            'compiler': r['compiler'], 'threads': int(r['nthreads']), 'sha': sha,
+            'dirty': r['phantom_sha'].endswith('-dirty'), 'branch': r['phantom_branch'],
+            'sha_date': info.get('date') or r.get('phantom_date') or r['date'],
+            'subject': info.get('subject', ''), 'date': r['date'], 'npart': fnum(r['npart']),
+            'nsteps': fnum(r['nsteps']), 'time': run_time(r), 'total': fnum(r['wall']),
+            'cpu_time': fnum(r.get('cpu_time')), 'mpart': fnum(r.get('mpart_per_s')),
+            'status': r['status'], 'routines': routine_times(r)})
+    return runs
+
+
+def best_scaling(rows, bench):
+    """for each machine, the strong scaling of its fastest build with at least two thread counts"""
+    series = {}
+    for machine in sorted({r['machine'] for r in rows}):
+        data, _ = scaling_data([r for r in rows if r['machine'] == machine], bench)
+        data = {lab: d for lab, d in data.items() if len(d) > 1}
+        if data:
+            # fastest at the largest number of threads measured for that build
+            lab = min(data, key=lambda lab: data[lab][max(data[lab])])
+            series[f'{machine} ({lab})'] = data[lab]
+    return series
+
+
+def write_site(resultsdir, sitedir, phantomdir=None):
+    """interactive website (index.html, app.js, data.json), with a report for each machine and
+    figures and tables comparing the strong scaling of each benchmark across machines"""
     os.makedirs(sitedir, exist_ok=True)
-    links = []
-    for machine in sorted(os.listdir(resultsdir)):
-        rows = read_results(resultsdir, [machine])
-        if not rows:
-            continue
-        write_report(rows, os.path.join(sitedir, machine), machine, True, None)
-        links.append(f'<li><a href="{machine}/report.html">{machine}</a> '
-                     f'({html.escape(rows[-1]["cpu"])}, last run {rows[-1]["date"][:10]})</li>')
-    # history of timings for each benchmark across all machines and builds
     allrows = read_results(resultsdir)
-    charts = [history_chart(allrows, b, 'All machines') for b in sorted({r['bench'] for r in allrows})]
-    body = ('<h1>Phantom nightly benchmarking</h1>\n'
-            '<p>Source and raw data: <a href="https://github.com/phantomSPH/phantom-benchmarks">'
-            'phantom-benchmarks</a>. Detailed reports for each machine:</p>\n<ul>'
-            + '\n'.join(links) + '</ul>\n' + '\n'.join(charts))
-    with open(os.path.join(sitedir, 'index.html'), 'w') as f:
-        f.write(page('Phantom nightly benchmarking', body, home='index.html'))
+    for machine in sorted({r['machine'] for r in allrows}):
+        write_report([r for r in allrows if r['machine'] == machine],
+                     os.path.join(sitedir, machine), machine, True, None)
+    figures = {}
+    for bench in sorted({r['bench'] for r in allrows}):
+        series = best_scaling(allrows, bench)
+        if not series:
+            continue
+        base = os.path.join(sitedir, f'scaling-{bench}')
+        files = (paper_plot(series, 'time', f'{bench} (strong scaling)', base) +
+                 paper_plot(series, 'speedup', f'{bench} (strong scaling)',
+                            os.path.join(sitedir, f'speedup-{bench}')))
+        npart = next((r['npart'] for r in allrows if r['bench'] == bench), '?')
+        with open(base + '.tex', 'w') as f:
+            f.write(latex_table(series, bench, 'several machines', npart, colname=str) + '\n')
+        figures[bench] = [os.path.basename(f) for f in files] + [os.path.basename(base) + '.tex']
+    data = {'runs': site_data(allrows, read_commits(phantomdir)), 'figures': figures}
+    with open(os.path.join(sitedir, 'data.json'), 'w') as f:
+        json.dump(data, f, separators=(',', ':'))
+    for name in ('index.html', 'app.js'):
+        shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'site', name), sitedir)
     print(f'site written to {sitedir}/index.html')
 
 
@@ -503,10 +557,12 @@ def main():
     parser.add_argument('--su', metavar='NPART:NSTEPS:NCORES:NRUNS',
                         help='estimate service units for a production run')
     parser.add_argument('--site', metavar='DIR', help='write static website to DIR')
+    parser.add_argument('--phantom', metavar='DIR',
+                        help='phantom git checkout, used to order results by phantom version')
     args = parser.parse_args()
 
     if args.site:
-        write_site(args.results, args.site)
+        write_site(args.results, args.site, args.phantom)
         return
     rows = read_results(args.results, [args.machine] if args.machine else None,
                         args.benchmarks or None)

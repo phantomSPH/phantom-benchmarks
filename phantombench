@@ -124,7 +124,8 @@ case "$command" in
      if git diff --cached --quiet -- $results; then echo "no new results in $results"; exit 0; fi
      git commit -m "results: $PHANTOMBENCH_MACHINE `date +%F`" -- $results && git push;;
   site)
-     $report --site ${1:-$topdir/site};;
+     # the phantom checkout is used to order results by phantom version
+     $report --site ${1:-$topdir/site} --phantom $PHANTOM_DIR;;
   submit)
      # download data on the login node, since compute nodes may not have internet access
      export PHANTOMBENCH_TIER=${PHANTOMBENCH_TIER:-all}

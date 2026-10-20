@@ -34,7 +34,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install matplotlib
-      - run: ./phantombench site site
+      # phantom history only (no files), to order the results by phantom version
+      - run: git clone --filter=blob:none --no-checkout https://github.com/danieljprice/phantom phantom-history
+      - run: PHANTOM_DIR=$PWD/phantom-history ./phantombench site site
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
