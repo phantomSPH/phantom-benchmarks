@@ -166,6 +166,10 @@ case "$command" in
      # (e.g. by the GitHub Actions bot); other changes in the working copy are left alone
      cd $topdir;
      results=results/$PHANTOMBENCH_MACHINE;
+     # never publish results left half-merged by a failed pull or stash
+     if grep -l -E '^(<<<<<<<|=======|>>>>>>>)' $results/*.csv; then
+        echo "ERROR: merge conflict markers in the files above: fix them, then publish again"; exit 1;
+     fi
      git add $results;
      if git diff --cached --quiet -- $results; then echo "no new results in $results"; exit 0; fi
      git commit -q -m "results: $PHANTOMBENCH_MACHINE `date +%F`" -- $results && \
