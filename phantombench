@@ -2,7 +2,7 @@
 #
 # The Phantom benchmarking suite: main entry point
 #
-# Usage: phantombench [command] [options] [benchmarks]
+# Usage: phantombench command [options] [benchmarks]
 #
 # Commands:
 #   run [bench...]        run benchmarks (default: quick tier) and print a report
@@ -33,7 +33,7 @@
 #                         PHANTOMBENCH_HYBRID_SYSTEMS on PHANTOMBENCH_HYBRID_NODES nodes
 #                         (submit-hybrid-and-publish also publishes the results)
 #
-# With no command, runs the quick tier with sensible defaults for this machine.
+# With no command, prints this message.
 #
 topdir=$(cd "$(dirname "$0")" && pwd)
 scriptdir=$topdir/scripts
@@ -115,7 +115,7 @@ partition()
   if [[ "$1" == "none" ]]; then echo "QNAME= QPARTITION="; elif [ -n "$1" ]; then echo "QPARTITION=$1"; fi
 }
 
-command=${1:-run}
+command=${1:-help}
 [ $# -gt 0 ] && shift
 case "$command" in
   run)

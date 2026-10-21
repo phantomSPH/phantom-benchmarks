@@ -14,7 +14,7 @@ Results are stored as `.csv` files in [results/](results/), one directory per ma
 ```
 git clone https://github.com/phantomSPH/phantom-benchmarks
 cd phantom-benchmarks
-PHANTOM_DIR=~/phantom ./phantombench
+PHANTOM_DIR=~/phantom ./phantombench run
 ```
 
 This builds Phantom with `SYSTEM=gfortran`, downloads the initial conditions and runs the quick benchmarks. It uses one openMP thread per performance core. It then prints a summary, including where the time goes (tree build, density, force, the rest of the calculation, and startup, from Phantom's timing table), and writes `runs/reports/<machine>/report.html`. Nothing is uploaded.
