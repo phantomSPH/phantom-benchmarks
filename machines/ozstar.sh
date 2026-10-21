@@ -1,6 +1,6 @@
 # Settings for the Ngarrgu Tindebeek (milan) nodes of OzSTAR (Swinburne), used by phantombench
 # on this machine
-# hosts: tooarrana* farnarkle*
+# hosts: tooarrana* farnarkle* dave*
 #
 # compilers to benchmark, as phantom SYSTEMs (nt = aocc on the milan nodes)
 PHANTOMBENCH_SYSTEMS=${PHANTOMBENCH_SYSTEMS:-"nt gfortran ifx"}
