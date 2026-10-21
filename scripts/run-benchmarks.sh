@@ -17,7 +17,7 @@
 #   PHANTOMBENCH_LABEL      label for this build in results (default $SYSTEM)
 #   PHANTOMBENCH_MAKEFLAGS  extra variables passed to make, e.g. "FC=gfortran-15"
 #   PHANTOMBENCH_TIER       quick, full or all (default all)
-#   PHANTOMBENCH_DATA       cache for downloaded dump files (default ~/.cache/phantombench)
+#   PHANTOMBENCH_DATA       downloaded dump files, shared by all runs (default runs/data)
 #   PHANTOMBENCH_RESULTS    where to write results .csv files (default results/)
 #   PHANTOMBENCH_RUNDIR     where to run the calculations (default runs/)
 #   PHANTOMBENCH_MACHINE    machine name used to label results (default hostname)
@@ -53,9 +53,9 @@ nthreads=${OMP_NUM_THREADS};
 if [[ $MPI == "yes" ]]; then label=${PHANTOMBENCH_LABEL:-$SYSTEM-mpi}; else label=${PHANTOMBENCH_LABEL:-$SYSTEM}; fi
 tier=${PHANTOMBENCH_TIER:-all};
 srcdir=$topdir/benchmarks;
-datadir=${PHANTOMBENCH_DATA:-~/.cache/phantombench};
 resultsdir=${PHANTOMBENCH_RESULTS:-$topdir/results};
 rundir=${PHANTOMBENCH_RUNDIR:-$topdir/runs};
+datadir=${PHANTOMBENCH_DATA:-$rundir/data};
 machine=$(get_machine_name);
 builddir="build-$label";
 codebinary="./$builddir/phantom";

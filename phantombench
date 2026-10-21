@@ -50,10 +50,10 @@ fi
 export SYSTEM=${SYSTEM:-gfortran}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-$(get_nperfcores)}
 export PHANTOM_DIR=${PHANTOM_DIR:-~/phantom}
-export PHANTOMBENCH_DATA=${PHANTOMBENCH_DATA:-~/.cache/phantombench}
+rundir=${PHANTOMBENCH_RUNDIR:-$topdir/runs}
+export PHANTOMBENCH_DATA=${PHANTOMBENCH_DATA:-$rundir/data}
 export OMP_STACKSIZE=${OMP_STACKSIZE:-1024m}
 export OMP_SCHEDULE=${OMP_SCHEDULE:-dynamic}
-rundir=${PHANTOMBENCH_RUNDIR:-$topdir/runs}
 label=${PHANTOMBENCH_LABEL:-$SYSTEM}
 report="python3 $scriptdir/report.py --results ${PHANTOMBENCH_RESULTS:-$topdir/results} --reports $rundir/reports"
 

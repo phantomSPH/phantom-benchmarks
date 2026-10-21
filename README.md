@@ -64,7 +64,7 @@ Settings are environment variables:
 | `PHANTOMBENCH_TIER` | `quick` | `quick`, `full` or `all` |
 | `PHANTOMBENCH_THREADS` | 1 2 4 ... ncores | thread counts for scaling tests |
 | `PHANTOMBENCH_MACHINE` | hostname | machine name used for the results directory |
-| `PHANTOMBENCH_DATA` | `~/.cache/phantombench` | cache for downloaded dump files |
+| `PHANTOMBENCH_DATA` | `runs/data` | downloaded dump files, shared by all runs |
 | `PHANTOMBENCH_RUNDIR` | `runs/` | where the calculations are run |
 
 ## Benchmarks
@@ -191,7 +191,7 @@ printf "totmom ref\nangtot ref\n" > CONSERVE
 
 5. Ensure your calculation is SHORT (runs in < 2 minutes) but REPRESENTATIVE, e.g. with typical particle numbers and timestep ranges
 
-6. Generate the reference data to which results should be compared. This runs the benchmark, writes `conservation.ref`, keeps the output dump as the reference dump with ".ref" as the file extension (stored in `~/.cache/phantombench/mybench/`), and writes the `.hashlist` file
+6. Generate the reference data to which results should be compared. This runs the benchmark, writes `conservation.ref`, keeps the output dump as the reference dump with ".ref" as the file extension (stored in `runs/data/mybench/`), and writes the `.hashlist` file
 ```
 cd ../..
 ./phantombench reference mybench

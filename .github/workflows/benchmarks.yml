@@ -109,7 +109,7 @@ jobs:
       - name: cache benchmark data
         uses: actions/cache@v6
         with:
-          path: ~/.cache/phantombench/${{ matrix.bench }}
+          path: runs/data/${{ matrix.bench }}
           key: phantombench-${{ matrix.bench }}-${{ hashFiles(format('benchmarks/{0}/.hashlist', matrix.bench)) }}
 
       # one step per compiler, each installed just before it is used, since installing a
