@@ -76,7 +76,7 @@ codelog="code-$label-$runtag.log";
 timelog="time-$label-$runtag.log";
 evlog="ev-$label-$runtag.log";
 makelog="make-$label.log";
-csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall,phantom_date"
+csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall,phantom_date,radiation"
 phantom_sha=`git -C $phantomdir rev-parse --short HEAD`;
 phantom_branch=`git -C $phantomdir rev-parse --abbrev-ref HEAD`;
 # date of the phantom commit, so that results can be plotted in commit order
@@ -341,7 +341,7 @@ write_csv()
   if [ "`head -1 $csvfile`" != "$csvheader" ]; then
      (echo "$csvheader"; tail -n +2 $csvfile) > $csvfile.tmp && mv $csvfile.tmp $csvfile;
   fi
-  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart,$codewall,$phantom_date" >> $csvfile;
+  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart,$codewall,$phantom_date,`get_timer radiation`" >> $csvfile;
 }
 log_failure()
 {
