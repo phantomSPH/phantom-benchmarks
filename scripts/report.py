@@ -177,7 +177,7 @@ def cpu_per_wall(row):
 
 # parts of the run timed by phantom: building the tree, density and force calculations, the
 # rest of the calculation, and startup (reading the dump and initial derivatives)
-ROUTINES = ['tree', 'density', 'force', 'other', 'startup']
+ROUTINES = ['tree', 'density', 'force', 'radiation', 'other', 'startup']
 
 
 def routine_times(row):
@@ -186,6 +186,8 @@ def routine_times(row):
     parts = [fnum(row.get(k)) for k in ('tree', 'density', 'force')]
     if not wall or None in parts:
         return None
+    # implicit radiation is only timed in builds with radiation (and in results since it was added)
+    parts.append(fnum(row.get('radiation')) or 0.)
     # proportions come from phantom's timers, scaled to the time for the calculation
     # (if phantom's clock is unreliable this is the whole run, so startup is not separated)
     total = code or fnum(row.get('step'))

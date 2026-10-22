@@ -2,7 +2,7 @@
 // Each tab shows all of its tables and charts one after another, with links to jump to each part
 'use strict';
 
-const ROUTINES = ['tree', 'density', 'force', 'other', 'startup'];
+const ROUTINES = ['tree', 'density', 'force', 'radiation', 'other', 'startup'];
 const CHANGE = 5;   // per cent change in time that is flagged in the history
 let RUNS = [], FIGURES = {}, SHAS = [];
 

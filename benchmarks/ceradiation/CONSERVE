@@ -1,0 +1,13 @@
+# quantity  mode  [C, floor in units of machine epsilon]
+# common envelope with implicit radiation: self-gravity + 2 sinks, global timesteps
+# total energy changes through the implicit gas-radiation exchange, so it is compared to the reference.
+# the treecode conserves linear and angular momentum exactly, so these are enforced to round-off
+# (they are constant to the precision of the .ev file in the reference run).
+# The centre of mass moves uniformly and is checked after removing that motion, with the same
+# allowance for round-off in summing m*x over 2e6 particles as the commonenv benchmark.
+etot   ref
+totmom exact
+angtot exact
+xcom   exact 5e6
+ycom   exact 5e6
+zcom   exact 5e6

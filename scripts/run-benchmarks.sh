@@ -176,13 +176,37 @@ run_benchmark()
    fi
 }
 #
+# download a file from the first url that works, unless it is already there
+# usage: download file url [url ...]
+#
+download()
+{
+   target=$1; shift;
+   if [ ! -s $target ]; then
+      mkdir -p `dirname $target`;
+      for url in "$@"; do
+         echo "Downloading ${url}";
+         curl -fL# -o $target.part "$url" && mv $target.part $target && break;
+      done
+   fi
+   if [ ! -s $target ]; then echo "ERROR: could not download $target"; return 1; fi
+}
+#
 # Download data files which are not commited to the repository
 # into a shared cache directory, then link them into the run directory.
 # Files placed in the benchmark directory itself are used in preference.
 # Each line of .hashlist is: sha256sum filename [url ...]
+# Data files that phantom itself needs (e.g. opacity tables) are listed in DATAFILES,
+# one per line as: path (under phantom's data directory) url [url ...]. These are
+# downloaded here so that runs also work on compute nodes without internet access
 #
 download_reference()
 {
+   if [ -e $src/DATAFILES ]; then
+      while read -r file urls; do
+         [ -z "$file" ] || download $phantomdir/data/$file $urls || return 1;
+      done < $src/DATAFILES
+   fi
    # initial dump placed in the benchmark directory (e.g. a new benchmark without a .hashlist)
    dumpin=`get_infile_value dumpfile $src/$name.in.s`;
    if [ -e $src/$dumpin ]; then ln -sf $src/$dumpin .; fi
@@ -194,15 +218,7 @@ download_reference()
       [[ "$PHANTOMBENCH_UPDATE_REF" == "yes" && $file == *.ref ]] && continue;
       cached=$datadir/$name/$file;
       if [ -e $src/$file ]; then cached=$src/$file; fi
-      if [ ! -s $cached ]; then
-         for url in $urls; do
-            echo "Downloading ${url}";
-            curl -fL# -o $cached.part "$url" && mv $cached.part $cached && break;
-         done
-      fi
-      if [ ! -s $cached ]; then
-         echo "ERROR: could not download $file"; return 1;
-      fi
+      download $cached $urls || return 1;
       ln -sf $cached $file;
       echo "$hash  $file" | shasum -a 256 -c --quiet || return 1;
    done < $src/.hashlist
@@ -420,7 +436,8 @@ get_benchmark_list()
 if [ $# -le 0 ]; then
    get_benchmark_list $srcdir/*;
 else
-   get_benchmark_list "$@";
+   # benchmarks named explicitly are run whatever their tier
+   tier=all get_benchmark_list "$@";
 fi
 if [ ${#list[@]} -eq 0 ]; then
    echo "No benchmarks found matching tier=$tier"; exit 1;

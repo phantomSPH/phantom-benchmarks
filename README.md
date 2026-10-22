@@ -189,6 +189,11 @@ echo quick > TIER
 printf "totmom ref\nangtot ref\n" > CONSERVE
 ```
 
+If phantom needs data files of its own for the calculation (e.g. MESA opacity tables), list them in a file named `DATAFILES`, one per line as the path under phantom's `data/` directory followed by the URL to download it from (see `map_dir_to_web` in phantom's `src/main/datafiles.f90`). They are then downloaded by `./phantombench fetch`, so that runs also work on compute nodes without internet access
+```
+echo "eos/mesa_opac/opacs.bindata https://zenodo.org/records/13148447/files/opacs.bindata" > DATAFILES
+```
+
 5. Ensure your calculation is SHORT (runs in < 2 minutes) but REPRESENTATIVE, e.g. with typical particle numbers and timestep ranges
 
 6. Generate the reference data to which results should be compared. This runs the benchmark, writes `conservation.ref`, keeps the output dump as the reference dump with ".ref" as the file extension (stored in `runs/data/mybench/`), and writes the `.hashlist` file
