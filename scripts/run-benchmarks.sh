@@ -99,7 +99,7 @@ build_benchmark()
       echo "Using existing build in $builddir";
    else
       echo "Building ${name} benchmark with SYSTEM=$SYSTEM $makeflags...";
-      rm -f phantom .buildtag;
+      rm -f phantom phantomsetup diffdumps showheader .buildtag;
       $phantomdir/scripts/writemake.sh $setup > Makefile;
       # phantom builds in $phantomdir/build, so only one build at a time per phantom directory
       lock=$phantomdir/build/.phantombench.lock;
