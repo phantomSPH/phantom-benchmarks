@@ -76,7 +76,7 @@ codelog="code-$label-$runtag.log";
 timelog="time-$label-$runtag.log";
 evlog="ev-$label-$runtag.log";
 makelog="make-$label.log";
-csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall,phantom_date,radiation"
+csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall,phantom_date,radiation,mpi"
 phantom_sha=`git -C $phantomdir rev-parse --short HEAD`;
 phantom_branch=`git -C $phantomdir rev-parse --abbrev-ref HEAD`;
 # date of the phantom commit, so that results can be plotted in commit order
@@ -127,6 +127,20 @@ get_compiler_version()
    else
       echo "unknown";
    fi
+}
+#
+# MPI library and version for MPI builds, e.g. "Open MPI 4.1.5", from "mpirun --version"
+#
+get_mpi_version()
+{
+   [[ $MPI == "yes" ]] || return 0;
+   out=`mpirun --version 2> /dev/null`;
+   case "$out" in
+     *"Open MPI"*) echo "$out" | grep -m1 -oE 'Open MPI\)? [0-9.]+' | sed 's/)//';;
+     *"Intel(R) MPI"*) echo "Intel MPI `echo "$out" | grep -m1 -oE 'Version [0-9.]+' | cut -d' ' -f2`";;
+     *HYDRA*) echo "MPICH `echo "$out" | grep -m1 -E '^ *Version:' | awk '{print $2}'`";;
+     *) echo "$out" | grep -m1 . | tr ',' ' ';;
+   esac
 }
 #
 # check that the files needed for this benchmark exist
@@ -341,7 +355,7 @@ write_csv()
   if [ "`head -1 $csvfile`" != "$csvheader" ]; then
      (echo "$csvheader"; tail -n +2 $csvfile) > $csvfile.tmp && mv $csvfile.tmp $csvfile;
   fi
-  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart,$codewall,$phantom_date,`get_timer radiation`" >> $csvfile;
+  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart,$codewall,$phantom_date,`get_timer radiation`,`get_mpi_version`" >> $csvfile;
 }
 log_failure()
 {

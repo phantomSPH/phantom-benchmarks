@@ -552,7 +552,8 @@ def site_data(rows, commits):
         sha = info['full'][:7] if info else r['phantom_sha'].replace('-dirty', '')
         runs.append({
             'machine': r['machine'], 'cpu': r['cpu'], 'bench': r['bench'], 'label': r['label'],
-            'compiler': r['compiler'], 'version': compiler_version(r), 'threads': int(r['nthreads']), 'nmpi': nmpi(r), 'sha': sha,
+            'compiler': r['compiler'], 'version': compiler_version(r), 'mpi': r.get('mpi') or '',
+            'threads': int(r['nthreads']), 'nmpi': nmpi(r), 'sha': sha,
             'dirty': r['phantom_sha'].endswith('-dirty'), 'branch': r['phantom_branch'],
             'sha_date': info.get('date') or r.get('phantom_date') or r['date'],
             'subject': info.get('subject', ''), 'date': r['date'], 'npart': fnum(r['npart']),
@@ -560,6 +561,21 @@ def site_data(rows, commits):
             'cpu_time': fnum(r.get('cpu_time')), 'mpart': fnum(r.get('mpart_per_s')),
             'status': r['status'], 'routines': routine_times(r)})
     return runs
+
+
+def core_speeds(machine):
+    """relative speed of the cores of a machine in the order threads fill them, from
+    PHANTOMBENCH_CORE_SPEEDS in machines/<machine>.sh, e.g. "10:1 10:0.5" for ten fast cores
+    then ten at half their speed; None if not set (all cores equally fast)"""
+    fname = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'machines', machine + '.sh')
+    if not os.path.exists(fname):
+        return None
+    with open(fname) as f:
+        m = re.search(r'^\s*(?:export\s+)?PHANTOMBENCH_CORE_SPEEDS=(?:\$\{PHANTOMBENCH_CORE_SPEEDS:-)?"([0-9.: ]+)"',
+                      f.read(), re.M)
+    if not m or not m.group(1).strip():
+        return None
+    return [[int(n), float(v)] for n, v in (x.split(':') for x in m.group(1).split())]
 
 
 def best_scaling(rows, bench):
@@ -596,7 +612,9 @@ def write_site(resultsdir, sitedir, phantomdir=None):
         with open(base + '.tex', 'w') as f:
             f.write(latex_table(series, bench, 'several machines', npart, colname=str) + '\n')
         figures[bench] = [os.path.basename(f) for f in files] + [os.path.basename(base) + '.tex']
-    data = {'runs': site_data(allrows, read_commits(phantomdir)), 'figures': figures}
+    speeds = {m: core_speeds(m) for m in sorted({r['machine'] for r in allrows})}
+    data = {'runs': site_data(allrows, read_commits(phantomdir)), 'figures': figures,
+            'core_speeds': {m: v for m, v in speeds.items() if v}}
     with open(os.path.join(sitedir, 'data.json'), 'w') as f:
         json.dump(data, f, separators=(',', ':'))
     for name in ('index.html', 'app.js'):
