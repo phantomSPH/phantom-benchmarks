@@ -441,17 +441,33 @@ function scalingCharts(c, lines) {
       return `${fmt(l.cv.get(n))} <span class="note">${fmt(100 * l.ref / (l.cv.get(n) * capacity(l.m, n)), 0)}%${split}</span>`; })])));
 }
 // time in each routine against number of cpus, for one benchmark, machine and openMP build
+// (solid), and for the fastest MPI run at each number of cores (dashed, as in the scaling charts)
 function routineChart(c, b, m, lab) {
   const rs = lastSet(RUNS.filter(r => good(r) && r.bench === b && r.machine === m && r.label === lab && r.routines), 2);
   const byN = [...groupBy(rs, r => r.threads)].sort((p, q) => p[0] - q[0]).map(([n, x]) => [n, x[x.length - 1].routines]);
-  if (byN.length < 2) return;
-  newChart(chartBox(c), { type: 'line', plugins: [endLabels],
-    data: { datasets: ROUTINES.map((k, i) => ({ label: k, endLabel: k, borderColor: colour(i), backgroundColor: 'transparent',
-            pointRadius: 3, borderWidth: 1.5, data: byN.filter(([, t]) => t[k] > 0).map(([n, t]) => ({ x: n, y: t[k] })) })) },
-    options: { plugins: { legend: { display: false }, title: { display: true, text: `time per routine: ${b} on ${mlabel(m)}, ${lab}` } },
+  const mpiByN = mpiRoutines(b, m);
+  if (byN.length + mpiByN.length < 2) return;
+  // each routine is labelled at the end of its rightmost line
+  const line = (k, i, pts, mpi) => ({ label: mpi ? `${k} (MPI)` : k, endLabel: mpi === (mpiByN.length > 0) ? k : '',
+    borderColor: colour(i), backgroundColor: 'transparent', pointRadius: 3, borderWidth: 1.5, borderDash: mpi ? [6, 3] : [],
+    data: pts.filter(([, t]) => t[k] > 0).map(([n, t]) => ({ x: n, y: t[k] })) });
+  const datasets = ROUTINES.map((k, i) => line(k, i, byN, false));
+  if (mpiByN.length) datasets.push(...ROUTINES.map((k, i) => line(k, i, mpiByN, true)));
+  const title = `time per routine: ${b} on ${mlabel(m)}, ${lab}` + (mpiByN.length ? ' (dashed: fastest MPI run)' : '');
+  newChart(chartBox(c), { type: 'line', plugins: [endLabels], data: { datasets },
+    options: { plugins: { legend: { display: false }, title: { display: true, text: title } },
                layout: { padding: { right: 70 } },
-               scales: { x: ncpusAxis(Math.max(...byN.map(x => x[0]))),
+               scales: { x: ncpusAxis(Math.max(...byN.map(x => x[0]), ...mpiByN.map(x => x[0]))),
                          y: axisStyle({ type: 'logarithmic', title: axisTitle('time (s)') }) } } });
+}
+// time in each routine of the fastest MPI run at each number of cores (as in mpiCurve), as
+// [[cores, routines], ...]; with MPI the routine times include waiting for the other tasks
+function mpiRoutines(b, m) {
+  const mpi = mpiCurve(b, m);
+  if (!mpi) return [];
+  return [...mpi].map(([n, x]) => [n, RUNS.filter(r => ok(r) && r.bench === b && r.machine === m && r.label === x.label &&
+    r.nmpi === x.nmpi && r.threads === x.threads && r.sha === x.sha && r.routines).pop()])
+    .filter(([, r]) => r).map(([n, r]) => [n, r.routines]);
 }
 // every MPI tasks × threads combination run for one benchmark on one machine
 function mpiTable(c, b, m) {
