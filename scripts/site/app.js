@@ -177,6 +177,18 @@ function overview() {
     benches().filter(b => record.has(b)).map(() => ['', 'best'])));
   c.appendChild(el('p', '<span class="note">The fastest result on any machine, with any compiler and number of cores, ' +
     'with or without MPI, on the latest Phantom version run in each configuration.</span>'));
+  // the fastest run with MPI, which the overall record hides wherever openMP alone is faster
+  section(c, 'record-hybrid', 'Current hybrid MPI + openMP record for each benchmark');
+  const hybrid = fastestSeries(RUNS.filter(r => ok(r) && isMpi(r)));
+  c.appendChild(table(['benchmark', 'time (s)', 'machine', 'nodes', 'cores', 'MPI tasks × threads', 'build', 'Phantom version'],
+    benches().filter(b => hybrid.has(b)).map(b => { const x = hybrid.get(b);
+      return [b, fmt(x.time), `<span title="${x.machine}">${cpuName(x.machine)}</span>`,
+              Math.ceil(x.cores / fullNode(x.machine)), x.cores, layout(x.nmpi, x.threads, x.mpi),
+              withVersion(x.machine, x.label), `${x.sha} <span class="note">${x.branch}</span>`]; }),
+    benches().filter(b => hybrid.has(b)).map(b =>
+      ['', record.has(b) && hybrid.get(b).time === record.get(b).time ? 'best' : ''])));
+  c.appendChild(el('p', '<span class="note">The fastest result with MPI, on any number of tasks and nodes, ' +
+    'on the latest Phantom version run in each configuration; marked when it is also the overall record.</span>'));
   section(c, 'fastest', 'Fastest time on each machine (s), any compiler and number of cores, with or without MPI');
   // fastest series for each benchmark (columns) on each machine (rows)
   const best = new Map(machines().map(m => [m, fastestSeries(RUNS.filter(r => ok(r) && r.machine === m))]));
