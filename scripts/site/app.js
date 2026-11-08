@@ -108,7 +108,6 @@ function configBest(b, cfg) {
   }
   return best;
 }
-const configTimes = (b, cfg) => new Map([...configBest(b, cfg)].map(([k, x]) => [k, x.time]));
 // configuration name, e.g. "AMD EPYC 7543 (256 cpus, 16 × 16)" or "AMD EPYC 7543 (64 threads, openMP)",
 // giving the split into MPI tasks × threads where it is the same for every compiler and benchmark
 function configName(cfg) {
@@ -295,18 +294,22 @@ function compilers() {
   c.appendChild(el('p', `<span class="note">${RANKING_NOTE}</span>`));
   // summary: time relative to the fastest compiler in each configuration, for every benchmark
   section(c, 'compilers-all', 'All benchmarks: time relative to the fastest compiler on each machine (1.00 = fastest)');
+  c.appendChild(el('p', '<span class="note">Each entry gives the Phantom version (commit) of the run; hover for the ' +
+    'time and branch.</span>'));
   const cfgs = allConfigs();
-  const T = new Map(benches().map(b => [b, cfgs.map(cfg => configTimes(b, cfg))]));
+  const T = new Map(benches().map(b => [b, cfgs.map(cfg => configBest(b, cfg))]));
   const rows = [], classes = [];
   cfgs.forEach((cfg, k) => {
     const comps = uniq(benches().flatMap(b => [...T.get(b)[k].keys()]));
-    const rel = comps.map(comp => benches().map(b => {
-      const t = T.get(b)[k];
-      return t.has(comp) ? t.get(comp) / Math.min(...t.values()) : null; }));
+    // fastest series of each compiler on each benchmark, and its time relative to the fastest compiler
+    const xs = comps.map(comp => benches().map(b => T.get(b)[k].get(comp)));
+    const rel = xs.map(r => r.map((x, j) => x ? x.time / fastest([...T.get(benches()[j])[k].values()]).time : null));
     const gm = rel.map(r => r.filter(Boolean).length ? geomean(r.filter(Boolean)) : null);
     const bestgm = Math.min(...gm.filter(Boolean));
+    // each cell gives the Phantom version run, with the time and branch on hover
+    const cell = (x, v) => x ? `${fmt(v, 2)} <span class="note" title="${fmt(x.time)} s, ${x.branch}">${x.sha}</span>` : '';
     comps.forEach((comp, i) => {
-      rows.push([`${configCell(cfg)} · ${compHtml(comp)}`, ...rel[i].map(x => fmt(x, 2)), fmt(gm[i], 2)]);
+      rows.push([`${configCell(cfg)} · ${compHtml(comp)}`, ...xs[i].map((x, j) => cell(x, rel[i][j])), fmt(gm[i], 2)]);
       classes.push(['', ...rel[i].map(x => x === 1 ? 'best' : ''), gm[i] === bestgm ? 'best' : '']);
     });
   });
