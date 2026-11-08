@@ -15,6 +15,9 @@ const fmt = (x, d = 1) => (x == null || isNaN(x)) ? '' : x.toFixed(d);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const PALETTE = ['#0b6bcb', '#e8590c', '#2f9e44', '#c2255c', '#7048e8', '#0c8599', '#e67700', '#5c940d'];
 const colour = i => PALETTE[i % PALETTE.length];
+// markers and dash patterns distinguishing several series of the same colour
+const MARKERS = ['circle', 'triangle', 'rect', 'rectRot', 'star', 'crossRot'];
+const DASHES = [[], [6, 3], [2, 2], [8, 3, 2, 3], [12, 4], [4, 4]];
 const el = (tag, html) => { const e = document.createElement(tag); if (html != null) e.innerHTML = html; return e; };
 const content = () => document.getElementById('content');
 const benches = () => uniq(RUNS.map(r => r.bench));
@@ -176,8 +179,9 @@ function newChart(canvas, config) {
   const opts = Object.assign({ responsive: true, maintainAspectRatio: false, animation: false }, config.options);
   // legend in the page colours, leaving out series whose label starts with "_" (e.g. ideal scaling)
   opts.plugins = Object.assign({}, opts.plugins);
-  opts.plugins.legend = Object.assign({ labels: { color: css('--fg'), filter: l => !l.text.startsWith('_') } },
-                                      opts.plugins.legend);
+  const legend = opts.plugins.legend || {};
+  opts.plugins.legend = Object.assign({}, legend, { labels: Object.assign({ color: css('--fg'),
+    filter: l => !l.text.startsWith('_') }, legend.labels) });
   opts.plugins.title = Object.assign({ color: css('--fg') }, opts.plugins.title);
   config.options = opts;
   return new Chart(canvas, config);
@@ -570,7 +574,8 @@ function historyTab() {
   jumpTo(c, benches().map(b => [`history-${b}`, b]));
   c.appendChild(el('p', '<span class="note">Time for each machine and compiler, at full node, against Phantom version, ' +
     'in commit order, with the date at the top. Each run is a point, so repeated runs of a version show the spread; ' +
-    'lines join the medians. Hover for commit messages.</span>'));
+    'lines join the medians. Each machine has the same colour in every chart, with a different marker and dash for ' +
+    'each compiler. Hover for commit messages.</span>'));
   for (const b of benches()) {
     section(c, `history-${b}`, b);
     const rs = RUNS.filter(r => good(r) && r.bench === b && r.threads === fullNode(r.machine));
@@ -579,39 +584,26 @@ function historyTab() {
     const xaxes = { x: axisStyle({ type: 'category', labels: shas, title: axisTitle('Phantom version') }),
                     x2: axisStyle({ type: 'category', labels: shas.map(dateOf), position: 'top', grid: { display: false },
                                     title: axisTitle('date') }) };
-    const datasets = [];
-    [...groupBy(byMachine(rs), r => `${mlabel(r.machine)}, ${r.comp}`)].forEach(([name, x], i) => {
+    // each machine has the same colour in every chart, with a different marker and dash for each compiler
+    const datasets = [], groups = [...groupBy(byMachine(rs), r => `${mlabel(r.machine)}, ${r.comp}`)];
+    groups.forEach(([name, x]) => {
+      const m = x[0].machine, k = uniq(rs.filter(r => r.machine === m).map(r => r.comp)).indexOf(x[0].comp);
+      const style = { borderColor: colour(machines().indexOf(m)), backgroundColor: colour(machines().indexOf(m)),
+                      pointStyle: MARKERS[k % MARKERS.length] };
       // every run as a point, and a line through the median of each version
-      datasets.push({ label: '_' + name, type: 'scatter', backgroundColor: colour(i), pointRadius: 3,
-                      data: x.map(r => ({ x: r.sha, y: r.time, subject: r.subject })) });
+      datasets.push(Object.assign({ label: '_' + name, type: 'scatter', pointRadius: 3,
+                      data: x.map(r => ({ x: r.sha, y: r.time, subject: r.subject })) }, style));
       const bySha = [...groupBy(x, r => r.sha)].sort((p, q) => shaIndex(p[0]) - shaIndex(q[0]));
-      datasets.push({ label: name, borderColor: colour(i), backgroundColor: colour(i), pointRadius: 0, borderWidth: 1.5,
-                      data: bySha.map(([sha, rr]) => ({ x: sha, y: shaTime(rr) })) });
+      datasets.push(Object.assign({ label: name, pointRadius: 0, borderWidth: 1.5, borderDash: DASHES[k % DASHES.length],
+                      data: bySha.map(([sha, rr]) => ({ x: sha, y: shaTime(rr) })) }, style));
     });
-    newChart(chartBox(c), { type: 'line', data: { datasets },
+    // tall enough that the legend (about three series per row) leaves room for the times
+    newChart(chartBox(c, 480 + 24 * Math.ceil(groups.length / 3)), { type: 'line', data: { datasets },
       // logarithmic, since times differ by large factors between machines
       options: { scales: Object.assign({ y: axisStyle({ type: 'logarithmic', title: axisTitle('time (s)') }) }, xaxes),
-                 plugins: { tooltip: { callbacks: {
+                 plugins: { legend: { labels: { usePointStyle: true, boxHeight: 7 } }, tooltip: { callbacks: {
                    label: ctx => `${ctx.dataset.label.replace(/^_/, '')}: ${fmt(ctx.raw.y)} s`,
                    afterLabel: ctx => ctx.raw.subject || '' } } } } });
-    // parallel efficiency at full node by version, where runs at more than one thread count exist
-    const eff = [];
-    for (const [name, x] of groupBy(byMachine(RUNS.filter(r => good(r) && r.bench === b)), r => `${cpuName(r.machine)}, ${r.comp}`)) {
-      const pts = [];
-      for (const [sha, rr] of groupBy(x, r => r.sha)) {
-        const n = [...new Set(rr.map(r => r.threads))].sort((p, q) => p - q);
-        if (n.length < 2) continue;
-        const t = k => shaTime(rr.filter(r => r.threads === k)), n0 = n[0], n1 = n[n.length - 1];
-        pts.push({ x: sha, y: t(n0) * n0 / (t(n1) * n1) });
-      }
-      if (pts.length) eff.push({ label: `${name} (${Math.max(...x.map(r => r.threads))} threads)`,
-                                 data: pts.sort((p, q) => shaIndex(p.x) - shaIndex(q.x)) });
-    }
-    if (eff.length) {
-      newChart(chartBox(c, 280), { type: 'line',
-        data: { datasets: eff.map((d, i) => Object.assign(d, { borderColor: colour(i), backgroundColor: colour(i), pointRadius: 4 })) },
-        options: { scales: Object.assign({ y: axisStyle({ min: 0, max: 1.05, title: axisTitle('parallel efficiency, full node') }) }, xaxes) } });
-    }
     const changes = findChanges(rs);
     if (changes.length) details(c, `changes of more than ${CHANGE}% between versions (${changes.length})`, changeTable(changes));
   }
