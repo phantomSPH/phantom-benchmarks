@@ -73,6 +73,11 @@ def compiler_version(row):
     return numbers[-1] if numbers else ''
 
 
+def slug(text):
+    """text made safe for a file name, e.g. gfortran 12.3.0 -> gfortran-12.3.0"""
+    return re.sub(r'[^A-Za-z0-9.]+', '-', text).strip('-').lower()
+
+
 def compiler_label(row):
     """compiler, version and MPI library of a run, e.g. "gfortran 12.3.0, Open MPI 4.1.5",
     whatever label the build was given"""
@@ -513,7 +518,7 @@ def write_report(rows, outdir, machine, do_scaling, su, do_hybrid=False):
                 continue
             rheader, rbody = routine_table(rdata)
             rfigs = paper_plot({k: rdata[k] for k in ROUTINES}, 'time', f'{bench} ({lab}) - {machine}',
-                               os.path.join(outdir, f'scaling-{bench}-{lab}-routines'))
+                               os.path.join(outdir, f'scaling-{bench}-{slug(lab)}-routines'))
             md += ['', f'### Time per routine: {bench} ({lab})', '', markdown_table(rheader, rbody)]
             htm += [f'<h3>Time per routine: {bench} ({lab})</h3>', html_table(rheader, rbody)]
             htm += [f'<img src="{os.path.basename(f)}">' for f in rfigs if f.endswith('.png')]
@@ -687,7 +692,9 @@ def write_site(resultsdir, sitedir, phantomdir=None):
     os.makedirs(sitedir, exist_ok=True)
     allrows = read_results(resultsdir)
     for machine in sorted({r['machine'] for r in allrows}):
-        write_report([r for r in allrows if r['machine'] == machine],
+        # builds are named by compiler, version and MPI library on the website, whatever label
+        # they were run with (labels may mark e.g. a branch under test)
+        write_report([dict(r, label=compiler_label(r)) for r in allrows if r['machine'] == machine],
                      os.path.join(sitedir, machine), machine, True, None, True)
     figures = {}
     commits = read_commits(phantomdir)
