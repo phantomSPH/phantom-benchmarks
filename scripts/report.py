@@ -72,6 +72,13 @@ def compiler_version(row):
     return numbers[-1] if numbers else ''
 
 
+def compiler_label(row):
+    """compiler, version and MPI library of a run, e.g. "gfortran 12.3.0, Open MPI 4.1.5",
+    whatever label the build was given"""
+    name = f'{compiler_name(row)} {compiler_version(row)}'.strip()
+    return ', '.join(x for x in (name, row.get('mpi') or ('MPI' if is_mpi(row) else '')) if x)
+
+
 def fnum(x):
     """convert to float, returning None for empty or invalid entries"""
     try:
@@ -109,8 +116,9 @@ def nmpi(row):
 
 
 def is_mpi(row):
-    """run with a build that uses MPI (labelled e.g. gfortran-mpi), with any number of tasks"""
-    return nmpi(row) > 1 or row['label'].endswith('-mpi')
+    """run with a build that uses MPI (labelled e.g. gfortran-mpi, or with an MPI library
+    recorded), with any number of tasks"""
+    return nmpi(row) > 1 or row['label'].endswith('-mpi') or bool(row.get('mpi'))
 
 
 def cpus(row):
@@ -552,7 +560,8 @@ def site_data(rows, commits):
         sha = info['full'][:7] if info else r['phantom_sha'].replace('-dirty', '')
         runs.append({
             'machine': r['machine'], 'cpu': r['cpu'], 'bench': r['bench'], 'label': r['label'],
-            'compiler': r['compiler'], 'version': compiler_version(r), 'mpi': r.get('mpi') or '',
+            'compiler': r['compiler'], 'cname': compiler_name(r), 'version': compiler_version(r),
+            'mpi': r.get('mpi') or '',
             'threads': int(r['nthreads']), 'nmpi': nmpi(r), 'sha': sha,
             'dirty': r['phantom_sha'].endswith('-dirty'), 'branch': r['phantom_branch'],
             'sha_date': info.get('date') or r.get('phantom_date') or r['date'],
@@ -587,7 +596,8 @@ def best_scaling(rows, bench):
         if data:
             # fastest at the largest number of threads measured for that build
             lab = min(data, key=lambda lab: data[lab][max(data[lab])])
-            series[f'{machine} ({lab})'] = data[lab]
+            row = next(r for r in rows if r['machine'] == machine and r['label'] == lab)
+            series[f'{machine} ({compiler_label(row)})'] = data[lab]
     return series
 
 

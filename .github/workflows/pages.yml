@@ -5,7 +5,7 @@ name: pages
 on:
   push:
     branches: [ main ]
-    paths: [ 'results/**', 'scripts/report.py', '.github/workflows/pages.yml' ]
+    paths: [ 'results/**', 'scripts/report.py', 'scripts/site/**', '.github/workflows/pages.yml' ]
   workflow_dispatch:
   # called by the benchmarks workflow after committing results
   workflow_call:
