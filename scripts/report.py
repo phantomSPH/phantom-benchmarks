@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 from collections import defaultdict
@@ -72,6 +73,18 @@ def compiler_version(row):
     return numbers[-1] if numbers else ''
 
 
+def slug(text):
+    """text made safe for a file name, e.g. gfortran 12.3.0 -> gfortran-12.3.0"""
+    return re.sub(r'[^A-Za-z0-9.]+', '-', text).strip('-').lower()
+
+
+def compiler_label(row):
+    """compiler, version and MPI library of a run, e.g. "gfortran 12.3.0, Open MPI 4.1.5",
+    whatever label the build was given"""
+    name = f'{compiler_name(row)} {compiler_version(row)}'.strip()
+    return ', '.join(x for x in (name, row.get('mpi') or ('MPI' if is_mpi(row) else '')) if x)
+
+
 def fnum(x):
     """convert to float, returning None for empty or invalid entries"""
     try:
@@ -109,8 +122,9 @@ def nmpi(row):
 
 
 def is_mpi(row):
-    """run with a build that uses MPI (labelled e.g. gfortran-mpi), with any number of tasks"""
-    return nmpi(row) > 1 or row['label'].endswith('-mpi')
+    """run with a build that uses MPI (labelled e.g. gfortran-mpi, or with an MPI library
+    recorded), with any number of tasks"""
+    return nmpi(row) > 1 or row['label'].endswith('-mpi') or bool(row.get('mpi'))
 
 
 def cpus(row):
@@ -291,21 +305,24 @@ def hybrid_table(rows, bench):
     return header, body
 
 
-def latex_table(data, bench, machine, npart, colname=None):
-    """LaTeX table of wall times in the style used in computing time applications"""
+def latex_table(data, bench, machine, npart, colname=None, mpi=False):
+    """LaTeX table of wall times in the style used in computing time applications
+    (mpi: some columns are runs with MPI, so the number of cpus is MPI tasks x threads)"""
     colname = colname or (lambda lab: f'{machine} ({lab})')
     labels = sorted(data)
     threads = sorted({n for d in data.values() for n in d})
     lines = [r'\begin{table}', r'\centering',
              r'\begin{tabular}{r' + 'r' * len(labels) + '}', r'\hline',
-             'OMP threads & ' + ' & '.join(colname(lab) for lab in labels) + r' \\',
+             ('Ncpus & ' if mpi else 'OMP threads & ') + ' & '.join(colname(lab) for lab in labels) + r' \\',
              r'\hline']
     for n in threads:
         lines.append(f'{n} & ' + ' & '.join(f'{data[lab][n]:.1f}' if n in data[lab] else ''
                                             for lab in labels) + r' \\')
     lines += [r'\hline', r'\end{tabular}',
               rf'\caption{{Wall time in seconds for strong scaling of the {bench} benchmark '
-              rf'using {npart} SPH particles, running Phantom in openMP-only mode on {machine}.}}',
+              rf'using {npart} SPH particles, running Phantom ' +
+              (r'with openMP, or with MPI and openMP where an MPI library is given, ' if mpi else 'in openMP-only mode ') +
+              rf'on {machine}.}}',
               rf'\label{{tab:scaling-{bench}}}', r'\end{table}']
     return '\n'.join(lines)
 
@@ -378,12 +395,14 @@ def ideal_ncpus(speeds, nmax, measured=()):
     return sorted(xs)
 
 
-def paper_plot(series, kind, title, filebase, speeds=None):
+def paper_plot(series, kind, title, filebase, dashed=(), refs=None, speeds=None):
     """log-log plot against number of cpus in the style of the phantom paper (Price et al. 2018):
     black lines with open circles, each labelled at its end, and dotted lines for ideal scaling.
     kind is 'time' (wall time) or 'speedup' (relative to one cpu, assuming ideal scaling below
-    the smallest number of cpus measured). speeds, as for series_core_speeds, makes the ideal
-    line change slope where slower cores start to be used"""
+    the smallest number of cpus measured). Series named in dashed (e.g. runs with MPI) are drawn
+    dashed without ideal scaling. refs optionally gives the time on one fastest core for each
+    series. speeds, as for series_core_speeds, makes the ideal line change slope where slower
+    cores start to be used"""
     plt = pyplot()
     if plt is None:
         return []
@@ -391,17 +410,21 @@ def paper_plot(series, kind, title, filebase, speeds=None):
     nmax = max(max(d) for d in series.values() if d)
     # a shared straight ideal, for speedup on machines whose cores are all the same speed
     uniform = False
+    openmp = False
+    labels = []
     for name, times in series.items():
         n = [i for i in sorted(times) if times[i] and times[i] > 0]
         if not n:
             continue
         sp = series_core_speeds(speeds, name)
         # time on one fastest core, so the ideal line passes through the first measurement
-        t0 = times[n[0]] * core_capacity(sp, n[0])
+        t0 = refs[name] if refs and name in refs else times[n[0]] * core_capacity(sp, n[0])
         y = [times[i] for i in n] if kind == 'time' else [t0 / times[i] for i in n]
-        ax.plot(n, y, 'k-', marker='o', mfc='none', ms=6, lw=1)
-        ax.annotate(name, (n[-1], y[-1]), xytext=(6, 0), textcoords='offset points',
-                    va='center', fontsize=9)
+        ax.plot(n, y, 'k--' if name in dashed else 'k-', marker='o', mfc='none', ms=6, lw=1)
+        labels.append([name, n[-1], y[-1]])
+        if name in dashed:
+            continue
+        openmp = True
         xs = ideal_ncpus(sp, nmax, n)
         if sp:
             ideal = [t0 / core_capacity(sp, x) if kind == 'time' else core_capacity(sp, x) for x in xs]
@@ -410,12 +433,13 @@ def paper_plot(series, kind, title, filebase, speeds=None):
             ax.plot(xs, [t0 / x for x in xs], 'k:', lw=0.8)
         else:
             uniform = True
-    if kind == 'speedup' and uniform:
+    if kind == 'speedup' and (uniform or not openmp):
         xs = ideal_ncpus(None, nmax)
         ax.plot(xs, xs, 'k:', lw=0.8)
     ax.set_xscale('log')
     ax.set_yscale('log')
     ax.set_xlim(0.8, 4. * nmax)
+    end_labels(ax, labels)
     ax.xaxis.set_major_formatter('{x:g}')
     ax.set_xlabel('Ncpus')
     ax.set_ylabel('Wall Time (s)' if kind == 'time' else 'Speedup')
@@ -423,17 +447,30 @@ def paper_plot(series, kind, title, filebase, speeds=None):
     fig.tight_layout()
     files = [filebase + ext for ext in ('.pdf', '.png')]
     for f in files:
-        fig.savefig(f, dpi=150)
+        # labels at the ends of lines may extend beyond the axes
+        fig.savefig(f, dpi=150, bbox_inches='tight')
     plt.close(fig)
     return files
+
+
+def end_labels(ax, labels, gap=1.3):
+    """label each line at its last point [name, x, y], moving labels up where they would be closer
+    than a factor gap in y to a lower label ending at a similar number of cpus (log axes)"""
+    labels = sorted(labels, key=lambda lab: lab[2])
+    for i, lab in enumerate(labels):
+        for prev in labels[:i]:
+            if max(lab[1], prev[1]) / min(lab[1], prev[1]) < 8. and lab[2] < gap * prev[2]:
+                lab[2] = gap * prev[2]
+        ax.annotate(lab[0], (lab[1], lab[2]), xytext=(6, 0), textcoords='offset points',
+                    va='center', fontsize=9)
 
 
 def scaling_plot(data, bench, machine, filebase):
     """wall time and speedup against number of cpus for each build on one machine"""
     title = f'{bench} (strong scaling) - {machine}'
     speeds = core_speeds(machine)
-    return (paper_plot(data, 'time', title, filebase, speeds) +
-            paper_plot(data, 'speedup', title, filebase.replace('scaling-', 'speedup-', 1), speeds))
+    return (paper_plot(data, 'time', title, filebase, speeds=speeds) +
+            paper_plot(data, 'speedup', title, filebase.replace('scaling-', 'speedup-', 1), speeds=speeds))
 
 
 def compare(rows, base, head):
@@ -530,7 +567,8 @@ def write_report(rows, outdir, machine, do_scaling, su, do_hybrid=False):
                 continue
             rheader, rbody = routine_table(rdata)
             rfigs = paper_plot({k: rdata[k] for k in ROUTINES}, 'time', f'{bench} ({lab}) - {machine}',
-                               os.path.join(outdir, f'scaling-{bench}-{lab}-routines'), core_speeds(machine))
+                               os.path.join(outdir, f'scaling-{bench}-{slug(lab)}-routines'),
+                               speeds=core_speeds(machine))
             md += ['', f'### Time per routine: {bench} ({lab})', '', markdown_table(rheader, rbody)]
             htm += [f'<h3>Time per routine: {bench} ({lab})</h3>', html_table(rheader, rbody)]
             htm += [f'<img src="{os.path.basename(f)}">' for f in rfigs if f.endswith('.png')]
@@ -596,7 +634,8 @@ def site_data(rows, commits):
         sha = info['full'][:7] if info else r['phantom_sha'].replace('-dirty', '')
         runs.append({
             'machine': r['machine'], 'cpu': r['cpu'], 'bench': r['bench'], 'label': r['label'],
-            'compiler': r['compiler'], 'version': compiler_version(r), 'mpi': r.get('mpi') or '',
+            'compiler': r['compiler'], 'cname': compiler_name(r), 'version': compiler_version(r),
+            'mpi': r.get('mpi') or '',
             'threads': int(r['nthreads']), 'nmpi': nmpi(r), 'sha': sha,
             'dirty': r['phantom_sha'].endswith('-dirty'), 'branch': r['phantom_branch'],
             'sha_date': info.get('date') or r.get('phantom_date') or r['date'],
@@ -639,22 +678,86 @@ def core_speeds(machine):
     return [[int(n), float(v)] for n, v in (x.split(':') for x in m.group(1).split())]
 
 
-def best_scaling(rows, bench):
-    """for each machine, the strong scaling of its fastest build with at least two thread counts,
-    and the core speeds of machines whose cores are not all the same speed"""
-    series, speeds = {}, {}
-    for machine in sorted({r['machine'] for r in rows}):
-        data, _ = scaling_data([r for r in rows if r['machine'] == machine], bench)
-        data = {lab: d for lab, d in data.items() if len(d) > 1}
-        if data:
-            # fastest at the largest number of threads measured for that build
-            lab = min(data, key=lambda lab: data[lab][max(data[lab])])
-            key = f'{machine} ({lab})'
-            series[key] = data[lab]
-            sp = core_speeds(machine)
-            if sp:
-                speeds[key] = sp
-    return series, speeds
+def version_dates(rows, commits):
+    """date of each phantom version, used to order them: the commit date if known, otherwise the
+    date recorded with the run (as on the website)"""
+    dates = {}
+    for r in rows:
+        sha = r['phantom_sha'].replace('-dirty', '')
+        dates[sha] = commit_info(sha, commits).get('date') or r.get('phantom_date') or r['date']
+    return dates
+
+
+def last_set(rows, nmin, dates):
+    """runs of the latest phantom version among rows with at least nmin numbers of cpus, i.e. the
+    last complete scaling test (machines are benchmarked irregularly, so this may be old)"""
+    bysha = defaultdict(list)
+    for r in rows:
+        bysha[r['phantom_sha']].append(r)
+    full = [sha for sha, rs in bysha.items() if len({nmpi(r) * int(r['nthreads']) for r in rs}) >= nmin]
+    return bysha[max(full, key=lambda sha: dates[sha])] if full else []
+
+
+def median_times(rows, key):
+    """median time of the runs with each key"""
+    times = defaultdict(list)
+    for r in rows:
+        times[key(r)].append(run_time(r))
+    return {k: statistics.median(t) for k, t in sorted(times.items())}
+
+
+def machine_scaling(rows, bench, machine, dates):
+    """strong scaling of one benchmark on one machine, as on the website: the fastest openMP build
+    (at its largest number of threads) from its last scaling test, and the fastest run with MPI at
+    each number of cpus from the last MPI test. Returns the series, the names of the MPI series,
+    the time on one fastest core for each series (from the openMP build, if there is one), and
+    the core speeds of series whose cores differ in speed"""
+    rs = [r for r in rows if r['machine'] == machine and r['bench'] == bench and r['status'] != 'fail'
+          and run_time(r) and not r['phantom_sha'].endswith('-dirty')]
+    curves = {}
+    for lab in sorted({r['label'] for r in rs if not is_mpi(r)}):
+        cv = median_times(last_set([r for r in rs if r['label'] == lab and not is_mpi(r)], 2, dates),
+                          lambda r: int(r['nthreads']))
+        if len(cv) > 1:
+            curves[lab] = cv
+    series, mpi, refs, speeds = {}, set(), {}, {}
+    ref = None
+    sp = core_speeds(machine)
+    if curves:
+        lab = min(curves, key=lambda lab: curves[lab][max(curves[lab])])
+        name = f"{machine} ({compiler_label(next(r for r in rs if r['label'] == lab))})"
+        series[name] = curves[lab]
+        n0 = min(curves[lab])
+        # one fastest core, so ideal scaling can follow cores that are not all the same speed
+        ref = refs[name] = core_capacity(sp, n0) * curves[lab][n0]
+        if sp:
+            speeds[name] = sp
+    mrs = last_set([r for r in rs if is_mpi(r)], 1, dates)
+    best = {}
+    for (lab, nm, nt), t in median_times(mrs, lambda r: (r['label'], nmpi(r), int(r['nthreads']))).items():
+        if nm * nt not in best or t < best[nm * nt][0]:
+            best[nm * nt] = (t, lab)
+    if best:
+        name = f"{machine} ({compiler_label(next(r for r in mrs if r['label'] == best[max(best)][1]))})"
+        series[name] = {n: t for n, (t, _) in sorted(best.items())}
+        mpi.add(name)
+        n0 = min(best)
+        refs[name] = ref or core_capacity(sp, n0) * best[n0][0]
+    return series, mpi, refs, speeds
+
+
+def best_scaling(rows, bench, dates):
+    """strong scaling of one benchmark on every machine (see machine_scaling), machines using the
+    most cpus first, with the core speeds of machines whose cores are not all the same speed"""
+    series, mpi, refs, speeds = {}, set(), {}, {}
+    out = [machine_scaling(rows, bench, m, dates) for m in sorted({r['machine'] for r in rows})]
+    for s, m, ref, sp in sorted(out, key=lambda x: -max([n for d in x[0].values() for n in d] or [0])):
+        if any(len(d) > 1 for d in s.values()):
+            series.update(s)
+            mpi |= m
+            refs.update(ref)
+            speeds.update(sp)
+    return series, mpi, refs, speeds
 
 
 def write_site(resultsdir, sitedir, phantomdir=None):
@@ -663,23 +766,27 @@ def write_site(resultsdir, sitedir, phantomdir=None):
     os.makedirs(sitedir, exist_ok=True)
     allrows = read_results(resultsdir)
     for machine in sorted({r['machine'] for r in allrows}):
-        write_report([r for r in allrows if r['machine'] == machine],
+        # builds are named by compiler, version and MPI library on the website, whatever label
+        # they were run with (labels may mark e.g. a branch under test)
+        write_report([dict(r, label=compiler_label(r)) for r in allrows if r['machine'] == machine],
                      os.path.join(sitedir, machine), machine, True, None, True)
     figures = {}
+    commits = read_commits(phantomdir)
+    dates = version_dates(allrows, commits)
     for bench in sorted({r['bench'] for r in allrows}):
-        series, speeds = best_scaling(allrows, bench)
+        series, mpi, refs, speeds = best_scaling(allrows, bench, dates)
         if not series:
             continue
         base = os.path.join(sitedir, f'scaling-{bench}')
-        files = (paper_plot(series, 'time', f'{bench} (strong scaling)', base, speeds) +
+        files = (paper_plot(series, 'time', f'{bench} (strong scaling)', base, mpi, refs, speeds) +
                  paper_plot(series, 'speedup', f'{bench} (strong scaling)',
-                            os.path.join(sitedir, f'speedup-{bench}'), speeds))
+                            os.path.join(sitedir, f'speedup-{bench}'), mpi, refs, speeds))
         npart = next((r['npart'] for r in allrows if r['bench'] == bench), '?')
         with open(base + '.tex', 'w') as f:
-            f.write(latex_table(series, bench, 'several machines', npart, colname=str) + '\n')
+            f.write(latex_table(series, bench, 'several machines', npart, colname=str, mpi=bool(mpi)) + '\n')
         figures[bench] = [os.path.basename(f) for f in files] + [os.path.basename(base) + '.tex']
     speeds = {m: core_speeds(m) for m in sorted({r['machine'] for r in allrows})}
-    data = {'runs': site_data(allrows, read_commits(phantomdir)), 'figures': figures,
+    data = {'runs': site_data(allrows, commits), 'figures': figures,
             'core_speeds': {m: v for m, v in speeds.items() if v}}
     with open(os.path.join(sitedir, 'data.json'), 'w') as f:
         json.dump(data, f, separators=(',', ':'))

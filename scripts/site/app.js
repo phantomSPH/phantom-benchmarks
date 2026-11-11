@@ -15,6 +15,9 @@ const fmt = (x, d = 1) => (x == null || isNaN(x)) ? '' : x.toFixed(d);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const PALETTE = ['#0b6bcb', '#e8590c', '#2f9e44', '#c2255c', '#7048e8', '#0c8599', '#e67700', '#5c940d'];
 const colour = i => PALETTE[i % PALETTE.length];
+// markers and dash patterns distinguishing several series of the same colour
+const MARKERS = ['circle', 'triangle', 'rect', 'rectRot', 'star', 'crossRot'];
+const DASHES = [[], [6, 3], [2, 2], [8, 3, 2, 3], [12, 4], [4, 4]];
 const el = (tag, html) => { const e = document.createElement(tag); if (html != null) e.innerHTML = html; return e; };
 const content = () => document.getElementById('content');
 const benches = () => uniq(RUNS.map(r => r.bench));
@@ -26,13 +29,13 @@ function groupBy(runs, key) {
   for (const r of runs) { const k = key(r); if (!g.has(k)) g.set(k, []); g.get(k).push(r); }
   return g;
 }
-// largest number of threads run on each machine ("full node")
-const fullNode = m => Math.max(...RUNS.filter(r => r.machine === m && !(r.nmpi > 1 || r.label.endsWith('-mpi'))).map(r => r.threads));
-// machines are shown by their cpu and the number of cores used, e.g. "AMD EPYC 7763 (4 cores)",
-// with the machine name as a tooltip
+// largest number of threads run on each machine with openMP alone ("full node")
+const fullNode = m => Math.max(...RUNS.filter(r => r.machine === m && !isMpi(r)).map(r => r.threads));
+// machines are shown by their cpu and the number of cores in one node, e.g. "AMD EPYC 7763
+// (4 cores/node)", with the machine name as a tooltip (runs with MPI can use several nodes)
 const cpuName = m => (RUNS.filter(r => r.machine === m).pop().cpu || m)
   .replace(/\(R\)|\(TM\)|\bProcessor\b|\b\d+-Core\b|\bCPU\b|@.*$/g, '').replace(/\s+/g, ' ').trim();
-const mlabel = m => `${cpuName(m)} (${fullNode(m)} cores)`;
+const mlabel = m => `${cpuName(m)} (${fullNode(m)} cores/node)`;
 const mcell = m => `<span title="${m}">${mlabel(m)}</span>`;
 // total speed of the first n cores of a machine, relative to its fastest core, for machines with
 // cores of different speeds (SPEEDS[m] = [[count, speed], ...] in the order threads fill them);
@@ -73,37 +76,57 @@ const byMachine = runs => [...runs].sort((p, q) =>
 const ok = r => r.status !== 'fail' && r.time > 0 && !r.dirty;
 // runs with an MPI build (any number of tasks), and openMP-only runs (used for the
 // thread scaling of each build, the time per routine and the history)
-const isMpi = r => r.nmpi > 1 || r.label.endsWith('-mpi');
+const isMpi = r => r.nmpi > 1 || r.label.endsWith('-mpi') || !!r.mpi;
 const good = r => ok(r) && !isMpi(r);
 const cores = r => r.nmpi * r.threads;
 // how a run used the cores, e.g. "16 × 16" (MPI tasks × threads) or "64 threads"
 const layout = (nmpi, threads, mpi) => mpi ? `${nmpi} × ${threads}` : `${threads} threads`;
-// compiler (and MPI library) versions used in the latest run of a build on a machine,
-// e.g. "gfortran 13.3.0" or "gfortran-mpi 12.3.0, Open MPI 4.1.5"
-const withVersion = (m, lab) => {
-  const r = RUNS.filter(x => x.machine === m && x.label === lab && x.version).pop();
-  return r ? `${lab} <span class="note">${[r.version, r.mpi].filter(Boolean).join(', ')}</span>` : lab;
-};
+// the same, with the total number of cpus for MPI runs, e.g. "256 cpus, 16 × 16"
+const cpusText = x => x.mpi ? `${x.cores} cpus, ${layout(x.nmpi, x.threads, true)}` : layout(x.nmpi, x.threads, false);
+// builds are named by their compiler, version and MPI library, e.g. "gfortran 12.3.0, Open MPI 4.1.5",
+// whatever label they were run with (labels may mark e.g. a branch under test)
+const compName = r => [`${r.cname || r.label} ${r.version}`.trim(), r.mpi || (isMpi(r) ? 'MPI' : '')].filter(Boolean).join(', ');
+// the compiler name, with the version and MPI library in grey
+const compHtml = s => { const i = s.indexOf(' '); return i < 0 ? s : `${s.slice(0, i)} <span class="note">${s.slice(i + 1)}</span>`; };
+// compiler of the latest run of a build (label) on a machine
+const compOf = (m, lab) => RUNS.filter(r => r.machine === m && r.label === lab).pop().comp;
 // latest time of every series of runs (benchmark, machine, build, MPI tasks and threads)
 // among the given runs
 function seriesTimes(runs) {
   return [...groupBy(runs, r => [r.bench, r.machine, r.label, r.nmpi, r.threads].join('|')).values()].map(rs => {
-    const r = rs[0], sha = latestSha(rs);
-    return { bench: r.bench, machine: r.machine, label: r.label, nmpi: r.nmpi, threads: r.threads,
-             cores: cores(r), mpi: isMpi(r), sha, branch: rs.find(x => x.sha === sha).branch, time: latestTime(rs) };
+    const r = rs[0], sha = latestSha(rs), last = rs.filter(x => x.sha === sha).pop();
+    return { bench: r.bench, machine: r.machine, label: r.label, comp: last.comp, nmpi: r.nmpi, threads: r.threads,
+             cores: cores(r), mpi: isMpi(r), sha, branch: last.branch, time: latestTime(rs) };
   });
 }
-// time per build at full node on the latest phantom version, for one benchmark and machine:
-// openMP builds at the largest thread count, and MPI builds with their fastest split of the
-// same number of cores into MPI tasks × threads
-function fullNodeBest(b, m) {
+// the fastest series in xs
+const fastest = xs => xs.reduce((a, x) => x.time < a.time ? x : a);
+// configurations in which compilers are compared on a machine: openMP alone at full node and,
+// where runs with MPI used more cpus than one node, MPI at the largest number of cpus
+function configs(m) {
+  const n = fullNode(m), nmax = Math.max(0, ...RUNS.filter(r => ok(r) && isMpi(r) && r.machine === m).map(cores));
+  const out = [];
+  if (nmax > n) out.push({ m, cores: nmax, mpi: true, pick: r => ok(r) && isMpi(r) && r.machine === m && cores(r) === nmax });
+  out.push({ m, cores: n, mpi: false, pick: r => good(r) && r.machine === m && r.threads === n });
+  return out;
+}
+// fastest series of each compiler in one configuration, for one benchmark, on the latest phantom version
+function configBest(b, cfg) {
   const best = new Map();
-  for (const x of seriesTimes(RUNS.filter(r => ok(r) && r.bench === b && r.machine === m && cores(r) === fullNode(m)))) {
-    if (!best.has(x.label) || x.time < best.get(x.label).time) best.set(x.label, x);
+  for (const x of seriesTimes(RUNS.filter(r => r.bench === b && cfg.pick(r)))) {
+    if (!best.has(x.comp) || x.time < best.get(x.comp).time) best.set(x.comp, x);
   }
   return best;
 }
-const fullNodeTimes = (b, m) => new Map([...fullNodeBest(b, m)].map(([lab, x]) => [lab, x.time]));
+// configuration name, e.g. "AMD EPYC 7543 (256 cpus, 16 × 16)" or "AMD EPYC 7543 (64 threads, openMP)",
+// giving the split into MPI tasks × threads where it is the same for every compiler and benchmark
+function configName(cfg) {
+  if (!cfg.mpi) return `${cpuName(cfg.m)} (${cfg.cores} threads, openMP)`;
+  const splits = uniq(benches().flatMap(b => [...configBest(b, cfg).values()].map(x => layout(x.nmpi, x.threads, true))));
+  return `${cpuName(cfg.m)} (${cfg.cores} cpus, ${splits.length === 1 ? splits[0] : 'MPI + openMP'})`;
+}
+const configCell = cfg => `<span title="${cfg.m}">${configName(cfg)}</span>`;
+const allConfigs = () => machines().flatMap(configs);
 
 // ---------------------------------------------------------------- page elements
 function table(header, rows, classes) {
@@ -165,8 +188,9 @@ function newChart(canvas, config) {
   const opts = Object.assign({ responsive: true, maintainAspectRatio: false, animation: false }, config.options);
   // legend in the page colours, leaving out series whose label starts with "_" (e.g. ideal scaling)
   opts.plugins = Object.assign({}, opts.plugins);
-  opts.plugins.legend = Object.assign({ labels: { color: css('--fg'), filter: l => !l.text.startsWith('_') } },
-                                      opts.plugins.legend);
+  const legend = opts.plugins.legend || {};
+  opts.plugins.legend = Object.assign({}, legend, { labels: Object.assign({ color: css('--fg'),
+    filter: l => !l.text.startsWith('_') }, legend.labels) });
   opts.plugins.title = Object.assign({ color: css('--fg') }, opts.plugins.title);
   config.options = opts;
   return new Chart(canvas, config);
@@ -174,30 +198,42 @@ function newChart(canvas, config) {
 
 // ---------------------------------------------------------------- overview
 // fastest series for each benchmark among the given runs
-const fastestSeries = runs => new Map([...groupBy(seriesTimes(runs), x => x.bench)]
-  .map(([b, xs]) => [b, xs.reduce((a, x) => x.time < a.time ? x : a)]));
+const fastestSeries = runs => new Map([...groupBy(seriesTimes(runs), x => x.bench)].map(([b, xs]) => [b, fastest(xs)]));
 function overview() {
   const c = content();
   section(c, 'record', 'Current record for each benchmark');
   const record = fastestSeries(RUNS.filter(ok));
-  c.appendChild(table(['benchmark', 'time (s)', 'machine', 'cores', 'MPI tasks × threads', 'build', 'Phantom version'],
+  c.appendChild(table(['benchmark', 'time (s)', 'machine', 'cores', 'MPI tasks × threads', 'compiler', 'Phantom version'],
     benches().filter(b => record.has(b)).map(b => { const x = record.get(b);
       return [b, fmt(x.time), `<span title="${x.machine}">${cpuName(x.machine)}</span>`, x.cores,
-              layout(x.nmpi, x.threads, x.mpi), withVersion(x.machine, x.label), `${x.sha} <span class="note">${x.branch}</span>`]; }),
+              layout(x.nmpi, x.threads, x.mpi), compHtml(x.comp), `${x.sha} <span class="note">${x.branch}</span>`]; }),
     benches().filter(b => record.has(b)).map(() => ['', 'best'])));
   c.appendChild(el('p', '<span class="note">The fastest result on any machine, with any compiler and number of cores, ' +
     'with or without MPI, on the latest Phantom version run in each configuration.</span>'));
+  // the fastest run with MPI, which the overall record hides wherever openMP alone is faster
+  section(c, 'record-hybrid', 'Current hybrid MPI + openMP record for each benchmark');
+  const hybrid = fastestSeries(RUNS.filter(r => ok(r) && isMpi(r)));
+  c.appendChild(table(['benchmark', 'time (s)', 'machine', 'nodes', 'cores', 'MPI tasks × threads', 'compiler', 'Phantom version'],
+    benches().filter(b => hybrid.has(b)).map(b => { const x = hybrid.get(b);
+      return [b, fmt(x.time), `<span title="${x.machine}">${cpuName(x.machine)}</span>`,
+              Math.ceil(x.cores / fullNode(x.machine)), x.cores, layout(x.nmpi, x.threads, x.mpi),
+              compHtml(x.comp), `${x.sha} <span class="note">${x.branch}</span>`]; }),
+    benches().filter(b => hybrid.has(b)).map(b =>
+      ['', record.has(b) && hybrid.get(b).time === record.get(b).time ? 'best' : ''])));
+  c.appendChild(el('p', '<span class="note">The fastest result with MPI, on any number of tasks and nodes, ' +
+    'on the latest Phantom version run in each configuration; marked when it is also the overall record.</span>'));
   section(c, 'fastest', 'Fastest time on each machine (s), any compiler and number of cores, with or without MPI');
   // fastest series for each benchmark (columns) on each machine (rows)
   const best = new Map(machines().map(m => [m, fastestSeries(RUNS.filter(r => ok(r) && r.machine === m))]));
   c.appendChild(table(['machine', ...benches()], machines().map(m => [mcell(m), ...benches().map(b => {
     const x = best.get(m).get(b);
-    return x ? `${fmt(x.time)} <span class="note">${withVersion(m, x.label)}, ${layout(x.nmpi, x.threads, x.mpi)}</span>` : ''; })]),
+    return x ? `${fmt(x.time)} <span class="note">${compHtml(x.comp)}, ${cpusText(x)}</span>` : ''; })]),
     machines().map(m => ['', ...benches().map(b => {
       const x = best.get(m).get(b);
       return x && record.has(b) && x.time === record.get(b).time ? 'best' : ''; })])));
-  c.appendChild(el('p', '<span class="note">Each cell shows the fastest build and how it used the cores ' +
-    '(threads, or MPI tasks × threads). See the Compilers and Hardware tabs for comparisons at full node, and the ' +
+  c.appendChild(el('p', '<span class="note">Each cell shows the fastest compiler and how it used the cores ' +
+    '(threads, or total cpus and MPI tasks × threads, which can span several nodes). See the Compilers and Hardware ' +
+    'tabs for comparisons at full node, and the ' +
     'per-machine reports: ' + machines().map(m => `<a href="${m}/report.html">${m}</a>`).join(', ') + '.</span>'));
   section(c, 'ranking', 'Compiler ranking on each machine');
   c.appendChild(compilerRanking());
@@ -229,127 +265,144 @@ function findChanges(runs) {
   return out;
 }
 function changeTable(changes) {
-  return table(['benchmark', 'machine', 'build', 'threads', 'from', 'to', 'time (s)', 'change'],
-    changes.map(x => [x.key[0], mcell(x.key[1]), withVersion(x.key[1], x.key[2]), x.key[3], x.sha0, `<span title="${x.subject}">${x.sha1}</span>`,
+  return table(['benchmark', 'machine', 'compiler', 'threads', 'from', 'to', 'time (s)', 'change'],
+    changes.map(x => [x.key[0], mcell(x.key[1]), compHtml(compOf(x.key[1], x.key[2])), x.key[3], x.sha0, `<span title="${x.subject}">${x.sha1}</span>`,
                       `${fmt(x.t0)} → ${fmt(x.t1)}`, `${x.pct > 0 ? '+' : ''}${fmt(x.pct)}%`]),
     changes.map(x => [, , , , , , , x.pct > 0 ? 'worse' : 'best']));
 }
 
 // ---------------------------------------------------------------- compilers
-// compilers on each machine, fastest first, by the geometric mean over benchmarks of the time
-// relative to the fastest compiler on that machine, with the number of benchmarks each is fastest on
+// compilers in each configuration (see configs), fastest first, by the geometric mean over benchmarks
+// of the time relative to the fastest compiler, with the number of benchmarks each is fastest on
 function compilerRanking() {
   const ranks = [];
-  for (const m of machines()) {
-    const T = benches().map(b => fullNodeTimes(b, m)).filter(t => t.size);
-    const stats = uniq(T.flatMap(t => [...t.keys()])).map(lab => {
-      const rel = T.filter(t => t.has(lab)).map(t => t.get(lab) / Math.min(...t.values()));
-      return { lab, gm: geomean(rel), wins: rel.filter(x => x === 1).length, n: rel.length };
+  for (const cfg of allConfigs()) {
+    const B = benches().map(b => configBest(b, cfg)).filter(t => t.size);
+    const stats = uniq(B.flatMap(t => [...t.keys()])).map(comp => {
+      const rel = B.filter(t => t.has(comp)).map(t => t.get(comp).time / fastest([...t.values()]).time);
+      return { comp, gm: geomean(rel), wins: rel.filter(x => x === 1).length, n: rel.length };
     }).sort((p, q) => p.gm - q.gm);
-    if (stats.length) ranks.push([m, stats]);
+    if (stats.length) ranks.push([cfg, stats]);
   }
   const nmax = Math.max(0, ...ranks.map(([, st]) => st.length));
   const ordinal = i => ['1st', '2nd', '3rd'][i] || `${i + 1}th`;
   return table(['machine', ...[...Array(nmax).keys()].map(ordinal)],
-    ranks.map(([m, st]) => [mcell(m), ...st.map(x =>
-      `${withVersion(m, x.lab)} <span class="note">${fmt(x.gm, 2)}, fastest on ${x.wins}/${x.n}</span>`)]),
-    ranks.map(([, st]) => ['', 'best']));
+    ranks.map(([cfg, st]) => [configCell(cfg), ...st.map(x =>
+      `${compHtml(x.comp)} <span class="note">${fmt(x.gm, 2)}, fastest on ${x.wins}/${x.n}</span>`)]),
+    ranks.map(() => ['', 'best']));
 }
+const RANKING_NOTE = 'Compilers ordered by their time relative to the fastest compiler in each configuration, ' +
+  'averaged (geometric mean) over the benchmarks they were run on, on the latest Phantom version: openMP alone at ' +
+  'full node and, where MPI runs used more than one node, MPI + openMP at the largest number of cpus, using the ' +
+  'fastest split into MPI tasks × threads. 1.00 means fastest on every benchmark.';
 
 function compilers() {
   const c = content();
   jumpTo(c, [['compilers-rank', 'ranking'], ['compilers-all', 'all benchmarks'], ...benches().map(b => [`compilers-${b}`, b])]);
   section(c, 'compilers-rank', 'Compiler ranking on each machine');
   c.appendChild(compilerRanking());
-  c.appendChild(el('p', '<span class="note">Builds ordered by their time relative to the fastest build on that ' +
-    'machine, averaged (geometric mean) over the benchmarks they were run on, at full node on the latest Phantom version. ' +
-    '1.00 means fastest on every benchmark. MPI builds use their fastest split of the node into MPI tasks × threads.</span>'));
-  // summary: time relative to the fastest compiler on each machine, for every benchmark
-  section(c, 'compilers-all', 'All benchmarks: time relative to the fastest compiler on each machine (1.00 = fastest), full node');
-  const T = new Map(benches().map(b => [b, new Map(machines().map(m => [m, fullNodeTimes(b, m)]))]));
+  c.appendChild(el('p', `<span class="note">${RANKING_NOTE}</span>`));
+  // summary: time relative to the fastest compiler in each configuration, for every benchmark
+  section(c, 'compilers-all', 'All benchmarks: time relative to the fastest compiler on each machine (1.00 = fastest)');
+  c.appendChild(el('p', '<span class="note">Each entry gives the Phantom version (commit) of the run; hover for the ' +
+    'time and branch.</span>'));
+  const cfgs = allConfigs();
+  const T = new Map(benches().map(b => [b, cfgs.map(cfg => configBest(b, cfg))]));
   const rows = [], classes = [];
-  for (const m of machines()) {
-    const labels = uniq(benches().flatMap(b => [...T.get(b).get(m).keys()]));
-    const rel = labels.map(lab => benches().map(b => {
-      const t = T.get(b).get(m), best = Math.min(...t.values());
-      return t.has(lab) ? t.get(lab) / best : null; }));
+  cfgs.forEach((cfg, k) => {
+    const comps = uniq(benches().flatMap(b => [...T.get(b)[k].keys()]));
+    // fastest series of each compiler on each benchmark, and its time relative to the fastest compiler
+    const xs = comps.map(comp => benches().map(b => T.get(b)[k].get(comp)));
+    const rel = xs.map(r => r.map((x, j) => x ? x.time / fastest([...T.get(benches()[j])[k].values()]).time : null));
     const gm = rel.map(r => r.filter(Boolean).length ? geomean(r.filter(Boolean)) : null);
     const bestgm = Math.min(...gm.filter(Boolean));
-    labels.forEach((lab, i) => {
-      rows.push([`${mcell(m)} · ${withVersion(m, lab)}`, ...rel[i].map(x => fmt(x, 2)), fmt(gm[i], 2)]);
+    // each cell gives the Phantom version run, with the time and branch on hover
+    const cell = (x, v) => x ? `${fmt(v, 2)} <span class="note" title="${fmt(x.time)} s, ${x.branch}">${x.sha}</span>` : '';
+    comps.forEach((comp, i) => {
+      rows.push([`${configCell(cfg)} · ${compHtml(comp)}`, ...xs[i].map((x, j) => cell(x, rel[i][j])), fmt(gm[i], 2)]);
       classes.push(['', ...rel[i].map(x => x === 1 ? 'best' : ''), gm[i] === bestgm ? 'best' : '']);
     });
-  }
+  });
   c.appendChild(table(['machine and compiler', ...benches(), 'geometric mean'], rows, classes));
-  // each benchmark: time per compiler on each machine
+  // each benchmark: time per compiler in each configuration
   for (const b of benches()) {
-    section(c, `compilers-${b}`, `${b}: time per build (s), full node, latest Phantom version`);
-    const t = new Map(machines().map(m => [m, T.get(b).get(m)]).filter(([, x]) => x.size));
-    const ms = [...t.keys()], labels = uniq([...t.values()].flatMap(x => [...x.keys()]));
+    section(c, `compilers-${b}`, `${b}: time per compiler (s), latest Phantom version`);
+    const bs = cfgs.map(cfg => [cfg, configBest(b, cfg)]).filter(([, x]) => x.size);
+    const comps = uniq(bs.flatMap(([, x]) => [...x.keys()]));
     newChart(chartBox(c, 300), { type: 'bar',
-      data: { labels: ms.map(mlabel), datasets: labels.map((lab, i) => ({ label: lab, backgroundColor: colour(i),
-              data: ms.map(m => t.get(m).get(lab) ?? null) })) },
+      data: { labels: bs.map(([cfg]) => configName(cfg)), datasets: comps.map((comp, i) => ({ label: comp, backgroundColor: colour(i),
+              data: bs.map(([, x]) => x.has(comp) ? x.get(comp).time : null) })) },
       options: { scales: { x: axisStyle({ title: { display: false } }), y: axisStyle({ title: axisTitle('time (s)') }) } } });
     const rows = [], classes = [];
-    for (const m of ms) {
-      const best = Math.min(...t.get(m).values());
-      for (const [lab, x] of [...t.get(m)].sort((p, q) => p[1] - q[1])) {
-        const s = fullNodeBest(b, m).get(lab);
-        rows.push([mcell(m), withVersion(m, lab), layout(s.nmpi, s.threads, s.mpi), fmt(x), fmt(x / best, 2)]);
-        classes.push(['', '', '', x === best ? 'best' : '', '']);
+    for (const [cfg, x] of bs) {
+      const best = fastest([...x.values()]).time;
+      for (const s of [...x.values()].sort((p, q) => p.time - q.time)) {
+        rows.push([configCell(cfg), compHtml(s.comp), cpusText(s), fmt(s.time), fmt(s.time / best, 2)]);
+        classes.push(['', '', '', s.time === best ? 'best' : '', '']);
       }
     }
-    c.appendChild(table(['machine', 'build', 'threads or MPI tasks × threads', 'time (s)', 'relative'], rows, classes));
+    c.appendChild(table(['machine', 'compiler', 'threads, or cpus and MPI tasks × threads', 'time (s)', 'relative'], rows, classes));
   }
 }
 
 // ---------------------------------------------------------------- hardware
-// fastest compiler on each machine at full node: time and core-seconds (time x threads)
+// fastest result on each machine for one benchmark, on the latest phantom version: on any number of
+// cpus (with MPI possibly spanning several nodes), and on a single node (with core-seconds, time × cpus)
 function bestPerMachine(b) {
   const res = new Map();
   for (const m of machines()) {
-    const t = [...fullNodeTimes(b, m)];
-    if (!t.length) continue;
-    const [lab, x] = t.reduce((a, y) => y[1] < a[1] ? y : a);
-    res.set(m, { lab, t: x, cores: fullNode(m), cs: x * fullNode(m), cpu: RUNS.find(r => r.machine === m).cpu });
+    const xs = seriesTimes(RUNS.filter(r => ok(r) && r.bench === b && r.machine === m));
+    const node = xs.filter(x => x.cores <= fullNode(m));
+    if (!node.length) continue;
+    const n = fastest(node);
+    res.set(m, { any: fastest(xs), node: n, cs: n.time * n.cores });
   }
   return res;
 }
+// quantity f on each machine, relative to the smallest among the machines
+const relTo = (res, f) => { const best = Math.min(...[...res.values()].map(f)); return new Map([...res].map(([m, x]) => [m, f(x) / best])); };
+// fastest time on any number of cpus, on one node, and core-seconds on one node
+const HW_KEYS = [x => x.any.time, x => x.node.time, x => x.cs];
 function hardware() {
   const c = content();
   jumpTo(c, [['hardware-all', 'all benchmarks'], ...benches().map(b => [`hardware-${b}`, b])]);
   section(c, 'hardware-all', 'All benchmarks: overall speed of each machine, relative to the fastest (geometric mean)');
   const B = benches().map(bestPerMachine);
+  const R = B.map(res => HW_KEYS.map(f => relTo(res, f)));
   const stats = machines().map(m => {
-    const node = [], core = [];
-    B.forEach(res => { if (!res.has(m)) return;
-      node.push(res.get(m).t / Math.min(...[...res.values()].map(x => x.t)));
-      core.push(res.get(m).cs / Math.min(...[...res.values()].map(x => x.cs))); });
-    return { m, n: node.length, node: node.length ? geomean(node) : null, core: core.length ? geomean(core) : null };
-  });
-  const bn = Math.min(...stats.map(s => s.node).filter(Boolean)), bc = Math.min(...stats.map(s => s.core).filter(Boolean));
-  const sorted = stats;
-  c.appendChild(table(['machine', 'time per node', 'cost per core', 'benchmarks'],
-    sorted.map(s => [mcell(s.m), fmt(s.node, 2), fmt(s.core, 2), s.n]),
-    sorted.map(s => ['', s.node === bn ? 'best' : '', s.core === bc ? 'best' : '', ''])));
-  c.appendChild(el('p', '<span class="note">1.00 is the fastest machine on average. "Time per node" compares the ' +
-    'wall time using the whole machine; "cost per core" compares core-seconds (time × cores), ' +
-    'which is what is charged on clusters. Only benchmarks run on a machine are included in its average.</span>'));
+    const rs = R.filter(r => r[0].has(m));
+    return { m, n: rs.length, g: HW_KEYS.map((f, k) => rs.length ? geomean(rs.map(r => r[k].get(m))) : null),
+             cpus: Math.max(0, ...B.filter(res => res.has(m)).map(res => res.get(m).any.cores)) };
+  }).filter(s => s.n);
+  const best = HW_KEYS.map((f, k) => Math.min(...stats.map(s => s.g[k])));
+  const isBest = (s, k) => s.g[k] === best[k] ? 'best' : '';
+  c.appendChild(table(['machine', 'fastest, any number of cpus', 'most cpus used', 'time on one node', 'cost per core', 'benchmarks'],
+    stats.map(s => [mcell(s.m), fmt(s.g[0], 2), s.cpus, fmt(s.g[1], 2), fmt(s.g[2], 2), s.n]),
+    stats.map(s => ['', isBest(s, 0), '', isBest(s, 1), isBest(s, 2), ''])));
+  c.appendChild(el('p', '<span class="note">1.00 is the fastest machine on average. "Fastest" compares the best ' +
+    'wall time on any number of cpus, with MPI possibly spanning several nodes; "time on one node" compares the best ' +
+    'wall time on a single node; "cost per core" compares core-seconds (time × cpus) on one node, which is what is ' +
+    'charged on clusters. Only benchmarks run on a machine are included in its average.</span>'));
   for (const b of benches()) {
     const res = bestPerMachine(b), ms = [...res.keys()];
-    section(c, `hardware-${b}`, `${b}: fastest result on each machine, full node, latest Phantom version`);
-    for (const [key, text] of [['t', 'time (s)'], ['cs', 'core-seconds (time × cores)']]) {
-      newChart(chartBox(c, 70 + 34 * ms.length), { type: 'bar',
-        data: { labels: ms.map(mlabel), datasets: [{ label: text, backgroundColor: colour(key === 't' ? 0 : 1),
-                data: ms.map(m => res.get(m)[key]) }] },
-        options: { indexAxis: 'y', plugins: { legend: { display: false }, title: { display: true, text } },
-                   scales: { x: axisStyle({ title: { display: false } }), y: axisStyle({ title: { display: false } }) } } });
-    }
-    const bt = Math.min(...[...res.values()].map(x => x.t)), bcs = Math.min(...[...res.values()].map(x => x.cs));
+    section(c, `hardware-${b}`, `${b}: fastest result on each machine, latest Phantom version`);
+    newChart(chartBox(c, 70 + 50 * ms.length), { type: 'bar',
+      data: { labels: ms.map(mlabel), datasets: [
+        { label: 'any number of cpus', backgroundColor: colour(0), data: ms.map(m => res.get(m).any.time) },
+        { label: 'one node', backgroundColor: colour(2), data: ms.map(m => res.get(m).node.time) }] },
+      options: { indexAxis: 'y', plugins: { title: { display: true, text: 'time (s)' } },
+                 scales: { x: axisStyle({ title: { display: false } }), y: axisStyle({ title: { display: false } }) } } });
+    newChart(chartBox(c, 70 + 34 * ms.length), { type: 'bar',
+      data: { labels: ms.map(mlabel), datasets: [{ label: 'core-seconds', backgroundColor: colour(1), data: ms.map(m => res.get(m).cs) }] },
+      options: { indexAxis: 'y', plugins: { legend: { display: false }, title: { display: true, text: 'core-seconds on one node (time × cpus)' } },
+                 scales: { x: axisStyle({ title: { display: false } }), y: axisStyle({ title: { display: false } }) } } });
+    const [ra, rn, rc] = HW_KEYS.map(f => relTo(res, f));
+    const mark = (r, m) => r.get(m) === 1 ? 'best' : '';
     const rs = [...res];
-    c.appendChild(table(['machine', 'compiler', 'time (s)', 'core-seconds'],
-      rs.map(([m, x]) => [mcell(m), withVersion(m, x.lab), fmt(x.t), fmt(x.cs, 0)]),
-      rs.map(([, x]) => ['', '', x.t === bt ? 'best' : '', x.cs === bcs ? 'best' : ''])));
+    c.appendChild(table(['machine', 'fastest (s)', 'cpus', 'compiler', 'one node (s)', 'cpus', 'compiler', 'core-seconds'],
+      rs.map(([m, x]) => [mcell(m), fmt(x.any.time), cpusText(x.any), compHtml(x.any.comp),
+                          fmt(x.node.time), cpusText(x.node), compHtml(x.node.comp), fmt(x.cs, 0)]),
+      rs.map(([m]) => ['', mark(ra, m), '', '', mark(rn, m), '', '', mark(rc, m)])));
   }
 }
 
@@ -396,10 +449,10 @@ function machineLines(b, m) {
   // time on one (fastest) core, assuming ideal scaling below the smallest number of cores
   const first = cv => { const [n, t] = [...cv][0]; return capacity(m, n) * t; };
   const ref = omp ? first(omp[1]) : null;
-  if (omp) lines.push({ name: `${cpuName(m)}, ${omp[0]}`, date: omp[1].date, cv: omp[1], ref, m });
+  if (omp) lines.push({ name: `${cpuName(m)}, ${compOf(m, omp[0])}`, date: omp[1].date, cv: omp[1], ref, m });
   if (mpi) {
     const cv = new Map([...mpi].map(([n, x]) => [n, x.time]));
-    lines.push({ name: `${cpuName(m)}, ${[...mpi.values()].pop().label}`, date: mpi.date, cv, ref: ref || first(cv), mpi: true, m,
+    lines.push({ name: `${cpuName(m)}, ${[...mpi.values()].pop().comp}`, date: mpi.date, cv, ref: ref || first(cv), mpi: true, m,
                  splits: new Map([...mpi].map(([n, x]) => [n, layout(x.nmpi, x.threads, true)])) });
   }
   return lines;
@@ -471,7 +524,7 @@ function routineChart(c, b, m, lab) {
     data: pts.filter(([, t]) => t[k] > 0).map(([n, t]) => ({ x: n, y: t[k] })) });
   const datasets = ROUTINES.map((k, i) => line(k, i, byN, false));
   if (mpiByN.length) datasets.push(...ROUTINES.map((k, i) => line(k, i, mpiByN, true)));
-  const title = `time per routine: ${b} on ${mlabel(m)}, ${lab}` + (mpiByN.length ? ' (dashed: fastest MPI run)' : '');
+  const title = `time per routine: ${b} on ${mlabel(m)}, ${compOf(m, lab)}` + (mpiByN.length ? ' (dashed: fastest MPI run)' : '');
   newChart(chartBox(c), { type: 'line', plugins: [endLabels], data: { datasets },
     options: { plugins: { legend: { display: false }, title: { display: true, text: title } },
                layout: { padding: { right: 70 } },
@@ -494,8 +547,8 @@ function mpiTable(c, b, m) {
   if (!xs.length) return;
   const bestAt = n => Math.min(...xs.filter(x => x.cores === n).map(x => x.time));
   details(c, `every split into MPI tasks × threads on ${mlabel(m)} (${runDate(rs)})`,
-    table(['cores', 'MPI tasks × threads', 'build', 'time (s)'],
-      xs.map(x => [x.cores, layout(x.nmpi, x.threads, true), withVersion(m, x.label), fmt(x.time)]),
+    table(['cores', 'MPI tasks × threads', 'compiler', 'time (s)'],
+      xs.map(x => [x.cores, layout(x.nmpi, x.threads, true), compHtml(x.comp), fmt(x.time)]),
       xs.map(x => ['', '', '', x.time === bestAt(x.cores) ? 'best' : ''])));
 }
 function scaling() {
@@ -503,16 +556,27 @@ function scaling() {
   // benchmarks with runs at more than one number of cores, and the lines on each machine
   const byBench = benches().map(b => [b, machines().map((m, ci) => machineLines(b, m).map(l => Object.assign(l, { ci, m })))
     .flat()]).filter(([, ls]) => ls.some(l => l.cv.size > 1));
+  // all benchmarks on each machine, best first: the most cpus used, then the fastest at that number
   const byMachine = machines().map(m => [m, benches().map(b => [b, bestLine(b, m)]).filter(([, x]) => x && x.cv.size > 1)])
-    .filter(([, ls]) => ls.length);
+    .filter(([, ls]) => ls.length).map(([m, ls]) => {
+      const nmax = Math.max(...ls.flatMap(([, x]) => [...x.cv.keys()]));
+      const t = geomean(ls.filter(([, x]) => x.cv.has(nmax)).map(([, x]) => x.cv.get(nmax)));
+      return [m, ls, nmax, t]; }).sort((p, q) => q[2] - p[2] || p[3] - q[3]);
   if (!byBench.length) { c.appendChild(el('p', '<span class="note">no runs at more than one number of cores yet</span>')); return; }
-  jumpTo(c, [...byBench.map(([b]) => [`scaling-${b}`, b]), ...byMachine.map(([m]) => [`scaling-on-${m}`, `all benchmarks on ${mlabel(m)}`])]);
+  const onName = (m, nmax) => `${cpuName(m)} (up to ${nmax} cpus)`;
+  jumpTo(c, [...byMachine.map(([m, , nmax]) => [`scaling-on-${m}`, `all benchmarks on ${onName(m, nmax)}`]),
+             ...byBench.map(([b]) => [`scaling-${b}`, b])]);
   c.appendChild(el('p', '<span class="note">Wall time and speedup against number of cores, from the last scaling test ' +
     'on each machine (dated): the fastest openMP build (solid lines, with dotted lines for ideal scaling), and the ' +
     'fastest MPI run at each number of cores (dashed, same colour), which can span several nodes. On machines whose ' +
     'cores differ in speed, ideal scaling changes slope where threads start to use the slower cores. Parallel ' +
     'efficiency is the actual speed over that ideal, relative to the openMP time at the smallest number of ' +
     'cores (assuming ideal scaling below it).</span>'));
+  for (const [m, ls, nmax] of byMachine) {
+    section(c, `scaling-on-${m}`, `Strong scaling of all benchmarks on ${onName(m, nmax)}`);
+    c.appendChild(el('p', '<span class="note">The fastest run at each number of cores, with or without MPI.</span>'));
+    scalingCharts(c, ls.map(([b, x], i) => ({ name: b, date: x.date, cv: x.cv, ref: x.ref, splits: x.splits, m: x.m, ci: i })));
+  }
   for (const [b, ls] of byBench) {
     section(c, `scaling-${b}`, `${b} (strong scaling)`);
     scalingCharts(c, ls);
@@ -521,20 +585,19 @@ function scaling() {
     for (const m of machines()) { const omp = fastestCurve(b, m); if (omp) routineChart(c, b, m, omp[0]); }
     for (const m of machines()) mpiTable(c, b, m);
   }
-  for (const [m, ls] of byMachine) {
-    section(c, `scaling-on-${m}`, `Strong scaling of all benchmarks on ${mlabel(m)}`);
-    c.appendChild(el('p', '<span class="note">The fastest run at each number of cores, with or without MPI.</span>'));
-    scalingCharts(c, ls.map(([b, x], i) => ({ name: b, date: x.date, cv: x.cv, ref: x.ref, splits: x.splits, m: x.m, ci: i })));
-  }
 }
 
 // ---------------------------------------------------------------- history
+// time of one version of a compiler: the median of the repeated runs of each build (label), taking
+// the fastest build where a compiler was run with several
+const shaTime = rr => Math.min(...[...groupBy(rr, r => r.label).values()].map(x => median(x.map(r => r.time))));
 function historyTab() {
   const c = content();
   jumpTo(c, benches().map(b => [`history-${b}`, b]));
   c.appendChild(el('p', '<span class="note">Time for each machine and compiler, at full node, against Phantom version, ' +
     'in commit order, with the date at the top. Each run is a point, so repeated runs of a version show the spread; ' +
-    'lines join the medians. Hover for commit messages.</span>'));
+    'lines join the medians. Each machine has the same colour in every chart, with a different marker and dash for ' +
+    'each compiler. Hover for commit messages.</span>'));
   for (const b of benches()) {
     section(c, `history-${b}`, b);
     const rs = RUNS.filter(r => good(r) && r.bench === b && r.threads === fullNode(r.machine));
@@ -543,40 +606,26 @@ function historyTab() {
     const xaxes = { x: axisStyle({ type: 'category', labels: shas, title: axisTitle('Phantom version') }),
                     x2: axisStyle({ type: 'category', labels: shas.map(dateOf), position: 'top', grid: { display: false },
                                     title: axisTitle('date') }) };
-    const datasets = [];
-    [...groupBy(byMachine(rs), r => `${mlabel(r.machine)}, ${r.label}`)].forEach(([name, x], i) => {
+    // each machine has the same colour in every chart, with a different marker and dash for each compiler
+    const datasets = [], groups = [...groupBy(byMachine(rs), r => `${mlabel(r.machine)}, ${r.comp}`)];
+    groups.forEach(([name, x]) => {
+      const m = x[0].machine, k = uniq(rs.filter(r => r.machine === m).map(r => r.comp)).indexOf(x[0].comp);
+      const style = { borderColor: colour(machines().indexOf(m)), backgroundColor: colour(machines().indexOf(m)),
+                      pointStyle: MARKERS[k % MARKERS.length] };
       // every run as a point, and a line through the median of each version
-      datasets.push({ label: '_' + name, type: 'scatter', backgroundColor: colour(i), pointRadius: 3,
-                      data: x.map(r => ({ x: r.sha, y: r.time, subject: r.subject })) });
+      datasets.push(Object.assign({ label: '_' + name, type: 'scatter', pointRadius: 3,
+                      data: x.map(r => ({ x: r.sha, y: r.time, subject: r.subject })) }, style));
       const bySha = [...groupBy(x, r => r.sha)].sort((p, q) => shaIndex(p[0]) - shaIndex(q[0]));
-      datasets.push({ label: name, borderColor: colour(i), backgroundColor: colour(i), pointRadius: 0, borderWidth: 1.5,
-                      data: bySha.map(([sha, rr]) => ({ x: sha, y: median(rr.map(r => r.time)) })) });
+      datasets.push(Object.assign({ label: name, pointRadius: 0, borderWidth: 1.5, borderDash: DASHES[k % DASHES.length],
+                      data: bySha.map(([sha, rr]) => ({ x: sha, y: shaTime(rr) })) }, style));
     });
-    newChart(chartBox(c), { type: 'line', data: { datasets },
+    // tall enough that the legend (about three series per row) leaves room for the times
+    newChart(chartBox(c, 480 + 24 * Math.ceil(groups.length / 3)), { type: 'line', data: { datasets },
       // logarithmic, since times differ by large factors between machines
       options: { scales: Object.assign({ y: axisStyle({ type: 'logarithmic', title: axisTitle('time (s)') }) }, xaxes),
-                 plugins: { tooltip: { callbacks: {
+                 plugins: { legend: { labels: { usePointStyle: true, boxHeight: 7 } }, tooltip: { callbacks: {
                    label: ctx => `${ctx.dataset.label.replace(/^_/, '')}: ${fmt(ctx.raw.y)} s`,
                    afterLabel: ctx => ctx.raw.subject || '' } } } } });
-    // parallel efficiency at full node by version, where runs at more than one thread count exist
-    const eff = [];
-    for (const [name, x] of groupBy(byMachine(RUNS.filter(r => good(r) && r.bench === b)), r => `${cpuName(r.machine)}, ${r.label}`)) {
-      const pts = [];
-      for (const [sha, rr] of groupBy(x, r => r.sha)) {
-        const n = [...new Set(rr.map(r => r.threads))].sort((p, q) => p - q);
-        if (n.length < 2) continue;
-        const t = k => median(rr.filter(r => r.threads === k).map(r => r.time)), n0 = n[0], n1 = n[n.length - 1];
-        const machine = rr[0].machine;
-        pts.push({ x: sha, y: t(n0) * capacity(machine, n0) / (t(n1) * capacity(machine, n1)) });
-      }
-      if (pts.length) eff.push({ label: `${name} (${Math.max(...x.map(r => r.threads))} threads)`,
-                                 data: pts.sort((p, q) => shaIndex(p.x) - shaIndex(q.x)) });
-    }
-    if (eff.length) {
-      newChart(chartBox(c, 280), { type: 'line',
-        data: { datasets: eff.map((d, i) => Object.assign(d, { borderColor: colour(i), backgroundColor: colour(i), pointRadius: 4 })) },
-        options: { scales: Object.assign({ y: axisStyle({ min: 0, max: 1.05, title: axisTitle('parallel efficiency, full node') }) }, xaxes) } });
-    }
     const changes = findChanges(rs);
     if (changes.length) details(c, `changes of more than ${CHANGE}% between versions (${changes.length})`, changeTable(changes));
   }
@@ -598,6 +647,15 @@ document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click
   window.history.replaceState(null, '', '#' + b.dataset.tab); show(b.dataset.tab); window.scrollTo(0, 0); }));
 fetch('data.json').then(r => r.json()).then(d => {
   RUNS = d.runs.filter(r => r.time > 0);
+  // older results lack the compiler version or MPI library: take them from the latest run of the
+  // same build on the same machine that has them
+  for (const rs of groupBy(RUNS, r => r.machine + '|' + r.label).values()) {
+    for (const k of ['version', 'mpi']) {
+      const v = (rs.filter(r => r[k]).pop() || {})[k];
+      if (v) rs.forEach(r => { r[k] = r[k] || v; });
+    }
+  }
+  RUNS.forEach(r => { r.comp = compName(r); });
   FIGURES = d.figures || {};
   SPEEDS = d.core_speeds || {};
   // phantom versions in order of their date
