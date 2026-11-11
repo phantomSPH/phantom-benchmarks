@@ -13,7 +13,7 @@ OMP_PROC_BIND=${OMP_PROC_BIND:-close}
 OMP_PLACES=${OMP_PLACES:-"{5},{6},{7},{8},{9},{15},{16},{17},{18},{19},{0},{1},{2},{3},{4},{10},{11},{12},{13},{14}"}
 export OMP_PROC_BIND OMP_PLACES
 PHANTOMBENCH_THREADS=${PHANTOMBENCH_THREADS:-"1 2 4 6 8 10 12 16 20"}
-# speed of the cores relative to the first, in the order threads fill them (count:speed), so
-# that ideal scaling on the website allows for the slower Cortex-A725 cores
-# (set once measured: time of a 1-thread run on cpu 5 divided by that on cpu 0)
-#PHANTOMBENCH_CORE_SPEEDS=${PHANTOMBENCH_CORE_SPEEDS:-"10:1 10:0.5"}
+# speed of the cores relative to the first, in the order threads fill them (count:speed).
+# Threads use the ten Cortex-X925 cores first (3900 MHz), then the ten Cortex-A725 cores
+# (2808 MHz), so ideal scaling changes slope after 10 cores (2808/3900 = 0.72)
+PHANTOMBENCH_CORE_SPEEDS=${PHANTOMBENCH_CORE_SPEEDS:-"10:1 10:0.72"}

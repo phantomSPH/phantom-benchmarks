@@ -246,14 +246,20 @@ def scaling_data(rows, bench):
     return data, (ok[-1] if ok else None)
 
 
-def speedup(times):
-    """speedup and parallel efficiency relative to the smallest thread count"""
+def speedup(times, speeds=None):
+    """speedup and parallel efficiency relative to the smallest thread count.
+    Efficiency is the actual speed over the ideal. The ideal follows speeds
+    ([[count, speed], ...] in the order threads fill them) so slower cores count
+    for less than one; without speeds every core counts as one"""
     n0 = min(times)
-    return {n: (times[n0] * n0 / t, times[n0] * n0 / (t * n)) for n, t in times.items()}
+    c0 = core_capacity(speeds, n0)
+    return {n: (times[n0] * c0 / t, times[n0] * c0 / (t * core_capacity(speeds, n)))
+            for n, t in times.items()}
 
 
-def scaling_tables(data):
-    """wall time per thread count for each build, plus speedup and efficiency"""
+def scaling_tables(data, speeds=None):
+    """wall time per thread count for each build, plus speedup and efficiency.
+    Efficiency is actual speed over the ideal, allowing for slower cores"""
     labels = sorted(data)
     threads = sorted({n for d in data.values() for n in d})
     header = ['threads'] + [f'{lab} (s)' for lab in labels] + \
@@ -262,7 +268,7 @@ def scaling_tables(data):
     for n in threads:
         row = [n] + [f'{data[lab][n]:.1f}' if n in data[lab] else '' for lab in labels]
         for lab in labels:
-            s = speedup(data[lab]).get(n)
+            s = speedup(data[lab], speeds).get(n)
             row.append(f'{s[0]:.1f} / {100 * s[1]:.0f}%' if s else '')
         body.append(row)
     return header, body
@@ -308,7 +314,7 @@ def scaling_text(data, bench, machine, npart):
     """paste-ready paragraph summarising the scaling results"""
     best = min(((t, n, lab) for lab, d in data.items() for n, t in d.items()))
     t, n, lab = best
-    s, eff = speedup(data[lab])[n]
+    s, eff = speedup(data[lab], core_speeds(machine))[n]
     n0 = min(data[lab])
     # speedup is relative to one thread, assuming ideal scaling below the smallest thread count
     caveat = '' if n0 == 1 else f' (assuming ideal scaling up to {n0} threads)'
@@ -346,33 +352,70 @@ def pyplot():
         return None
 
 
-def paper_plot(series, kind, title, filebase):
+def series_core_speeds(speeds, name):
+    """core-speed profile for one plotted series. speeds is one profile for every series,
+    or a dict of profiles keyed by series name; None if that series has equal cores"""
+    if isinstance(speeds, dict):
+        return speeds.get(name)
+    return speeds
+
+
+def ideal_ncpus(speeds, nmax, measured=()):
+    """cpu counts for the ideal-scaling line: the ends of the axis, each change of core speed,
+    and the measured counts, so the dotted line is the ideal at every tabulated point and
+    changes slope where slower cores are used"""
+    lo, hi = 0.8, 1.5 * nmax
+    xs = {lo, hi}
+    cum, prev = 0, None
+    for count, speed in speeds or []:
+        if prev is not None and speed != prev and lo < cum < hi:
+            xs.add(float(cum))
+        cum += count
+        prev = speed
+    for n in measured:
+        if lo < n < hi:
+            xs.add(float(n))
+    return sorted(xs)
+
+
+def paper_plot(series, kind, title, filebase, speeds=None):
     """log-log plot against number of cpus in the style of the phantom paper (Price et al. 2018):
     black lines with open circles, each labelled at its end, and dotted lines for ideal scaling.
     kind is 'time' (wall time) or 'speedup' (relative to one cpu, assuming ideal scaling below
-    the smallest number of cpus measured)"""
+    the smallest number of cpus measured). speeds, as for series_core_speeds, makes the ideal
+    line change slope where slower cores start to be used"""
     plt = pyplot()
     if plt is None:
         return []
     fig, ax = plt.subplots(figsize=(5.5, 4.2))
     nmax = max(max(d) for d in series.values() if d)
-    xideal = [0.8, 1.5 * nmax]
+    # a shared straight ideal, for speedup on machines whose cores are all the same speed
+    uniform = False
     for name, times in series.items():
         n = [i for i in sorted(times) if times[i] and times[i] > 0]
         if not n:
             continue
-        t0 = times[n[0]] * n[0]
+        sp = series_core_speeds(speeds, name)
+        # time on one fastest core, so the ideal line passes through the first measurement
+        t0 = times[n[0]] * core_capacity(sp, n[0])
         y = [times[i] for i in n] if kind == 'time' else [t0 / times[i] for i in n]
         ax.plot(n, y, 'k-', marker='o', mfc='none', ms=6, lw=1)
         ax.annotate(name, (n[-1], y[-1]), xytext=(6, 0), textcoords='offset points',
                     va='center', fontsize=9)
-        if kind == 'time':
-            ax.plot(xideal, [t0 / x for x in xideal], 'k:', lw=0.8)
-    if kind == 'speedup':
-        ax.plot(xideal, xideal, 'k:', lw=0.8)
+        xs = ideal_ncpus(sp, nmax, n)
+        if sp:
+            ideal = [t0 / core_capacity(sp, x) if kind == 'time' else core_capacity(sp, x) for x in xs]
+            ax.plot(xs, ideal, 'k:', lw=0.8)
+        elif kind == 'time':
+            ax.plot(xs, [t0 / x for x in xs], 'k:', lw=0.8)
+        else:
+            uniform = True
+    if kind == 'speedup' and uniform:
+        xs = ideal_ncpus(None, nmax)
+        ax.plot(xs, xs, 'k:', lw=0.8)
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_xlim(xideal[0], 4. * nmax)
+    ax.set_xlim(0.8, 4. * nmax)
     ax.xaxis.set_major_formatter('{x:g}')
     ax.set_xlabel('Ncpus')
     ax.set_ylabel('Wall Time (s)' if kind == 'time' else 'Speedup')
@@ -388,8 +431,9 @@ def paper_plot(series, kind, title, filebase):
 def scaling_plot(data, bench, machine, filebase):
     """wall time and speedup against number of cpus for each build on one machine"""
     title = f'{bench} (strong scaling) - {machine}'
-    return (paper_plot(data, 'time', title, filebase) +
-            paper_plot(data, 'speedup', title, filebase.replace('scaling-', 'speedup-', 1)))
+    speeds = core_speeds(machine)
+    return (paper_plot(data, 'time', title, filebase, speeds) +
+            paper_plot(data, 'speedup', title, filebase.replace('scaling-', 'speedup-', 1), speeds))
 
 
 def compare(rows, base, head):
@@ -464,7 +508,7 @@ def write_report(rows, outdir, machine, do_scaling, su, do_hybrid=False):
         data, ref = scaling_data(rows, bench)
         if not data or max(len(d) for d in data.values()) < 2:
             continue
-        sheader, sbody = scaling_tables(data)
+        sheader, sbody = scaling_tables(data, core_speeds(machine))
         npart = ref['npart'] if ref else '?'
         tex = latex_table(data, bench, machine, npart)
         text = scaling_text(data, bench, machine, npart)
@@ -486,7 +530,7 @@ def write_report(rows, outdir, machine, do_scaling, su, do_hybrid=False):
                 continue
             rheader, rbody = routine_table(rdata)
             rfigs = paper_plot({k: rdata[k] for k in ROUTINES}, 'time', f'{bench} ({lab}) - {machine}',
-                               os.path.join(outdir, f'scaling-{bench}-{lab}-routines'))
+                               os.path.join(outdir, f'scaling-{bench}-{lab}-routines'), core_speeds(machine))
             md += ['', f'### Time per routine: {bench} ({lab})', '', markdown_table(rheader, rbody)]
             htm += [f'<h3>Time per routine: {bench} ({lab})</h3>', html_table(rheader, rbody)]
             htm += [f'<img src="{os.path.basename(f)}">' for f in rfigs if f.endswith('.png')]
@@ -563,10 +607,27 @@ def site_data(rows, commits):
     return runs
 
 
+def core_capacity(speeds, n):
+    """total speed of the first n cores relative to the fastest core. speeds is
+    [[count, speed], ...] in the order threads fill them; without it every core counts as 1.
+    Cores past the last group keep that group's speed"""
+    if not speeds:
+        return float(n)
+    cap, left, speed = 0., float(n), 1.
+    for count, group_speed in speeds:
+        speed = group_speed
+        k = min(left, count)
+        cap += k * speed
+        left -= k
+        if left <= 0:
+            return cap
+    return cap + left * speed
+
+
 def core_speeds(machine):
     """relative speed of the cores of a machine in the order threads fill them, from
-    PHANTOMBENCH_CORE_SPEEDS in machines/<machine>.sh, e.g. "10:1 10:0.5" for ten fast cores
-    then ten at half their speed; None if not set (all cores equally fast)"""
+    PHANTOMBENCH_CORE_SPEEDS in machines/<machine>.sh, e.g. "10:1 10:0.72" for ten fast cores
+    then ten at 0.72 times their speed; None if not set (all cores equally fast)"""
     fname = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'machines', machine + '.sh')
     if not os.path.exists(fname):
         return None
@@ -579,16 +640,21 @@ def core_speeds(machine):
 
 
 def best_scaling(rows, bench):
-    """for each machine, the strong scaling of its fastest build with at least two thread counts"""
-    series = {}
+    """for each machine, the strong scaling of its fastest build with at least two thread counts,
+    and the core speeds of machines whose cores are not all the same speed"""
+    series, speeds = {}, {}
     for machine in sorted({r['machine'] for r in rows}):
         data, _ = scaling_data([r for r in rows if r['machine'] == machine], bench)
         data = {lab: d for lab, d in data.items() if len(d) > 1}
         if data:
             # fastest at the largest number of threads measured for that build
             lab = min(data, key=lambda lab: data[lab][max(data[lab])])
-            series[f'{machine} ({lab})'] = data[lab]
-    return series
+            key = f'{machine} ({lab})'
+            series[key] = data[lab]
+            sp = core_speeds(machine)
+            if sp:
+                speeds[key] = sp
+    return series, speeds
 
 
 def write_site(resultsdir, sitedir, phantomdir=None):
@@ -601,13 +667,13 @@ def write_site(resultsdir, sitedir, phantomdir=None):
                      os.path.join(sitedir, machine), machine, True, None, True)
     figures = {}
     for bench in sorted({r['bench'] for r in allrows}):
-        series = best_scaling(allrows, bench)
+        series, speeds = best_scaling(allrows, bench)
         if not series:
             continue
         base = os.path.join(sitedir, f'scaling-{bench}')
-        files = (paper_plot(series, 'time', f'{bench} (strong scaling)', base) +
+        files = (paper_plot(series, 'time', f'{bench} (strong scaling)', base, speeds) +
                  paper_plot(series, 'speedup', f'{bench} (strong scaling)',
-                            os.path.join(sitedir, f'speedup-{bench}')))
+                            os.path.join(sitedir, f'speedup-{bench}'), speeds))
         npart = next((r['npart'] for r in allrows if r['bench'] == bench), '?')
         with open(base + '.tex', 'w') as f:
             f.write(latex_table(series, bench, 'several machines', npart, colname=str) + '\n')

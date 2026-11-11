@@ -36,11 +36,21 @@ const mlabel = m => `${cpuName(m)} (${fullNode(m)} cores)`;
 const mcell = m => `<span title="${m}">${mlabel(m)}</span>`;
 // total speed of the first n cores of a machine, relative to its fastest core, for machines with
 // cores of different speeds (SPEEDS[m] = [[count, speed], ...] in the order threads fill them);
-// otherwise n. Ideal scaling is then two or more straight lines joined
+// otherwise n. Cores beyond the last group keep that group's speed, so the ideal line does not
+// jump back to full speed past the last measured core. Ideal scaling is then straight lines joined
+// where the core speed changes
 function capacity(m, n) {
-  let cap = 0, left = n;
-  for (const [count, speed] of SPEEDS[m] || []) { const k = Math.min(left, count); cap += k * speed; left -= k; }
-  return cap + left;
+  const groups = SPEEDS[m];
+  if (!groups || !groups.length) return n;
+  let cap = 0, left = n, speed = 1;
+  for (const [count, s] of groups) {
+    speed = s;
+    const k = Math.min(left, count);
+    cap += k * speed;
+    left -= k;
+    if (left <= 0) return cap;
+  }
+  return cap + left * speed;
 }
 // numbers of cores at which the speed of the cores changes, for drawing ideal scaling
 const speedBreaks = m => (SPEEDS[m] || []).reduce((a, [count]) => [...a, (a[a.length - 1] || 0) + count], []);
@@ -410,7 +420,10 @@ function bestLine(b, m) {
 // cores differ in speed (see capacity)
 function scalingCharts(c, lines) {
   const nmax = Math.max(...lines.flatMap(l => [...l.cv.keys()]));
-  const idealN = m => [1, ...speedBreaks(m).filter(n => n < 2 * nmax), 2 * nmax];
+  // measured core counts as well as the speed changes, so the dotted line is the ideal at every
+  // row of the efficiency table and changes slope where slower cores start to be used
+  const idealN = (m, ns) => [...new Set([1, ...ns, ...speedBreaks(m).filter(x => x < 2 * nmax), 2 * nmax])]
+    .filter(x => x > 0).sort((a, b) => a - b);
   const label = l => l.date ? `${l.name} (${l.date})` : l.name;
   for (const kind of ['time', 'speedup']) {
     const datasets = [];
@@ -422,11 +435,14 @@ function scalingCharts(c, lines) {
       // ideal scaling, for openMP lines and for machines whose cores differ in speed
       if (!l.mpi && (kind === 'time' || SPEEDS[l.m])) {
         datasets.push({ label: '_ideal', borderColor: col, borderDash: [2, 3], borderWidth: 1, pointRadius: 0,
-          data: idealN(l.m).map(x => ({ x, y: kind === 'time' ? l.ref / capacity(l.m, x) : capacity(l.m, x) })) });
+          data: idealN(l.m, n).map(x => ({ x, y: kind === 'time' ? l.ref / capacity(l.m, x) : capacity(l.m, x) })) });
       }
     });
-    if (kind === 'speedup') datasets.push({ label: '_ideal', borderColor: css('--muted'), borderDash: [2, 3], borderWidth: 1,
-                                            pointRadius: 0, data: [1, 2 * nmax].map(x => ({ x, y: x })) });
+    // one straight ideal, shared by openMP lines whose cores are all the same speed. A chart of
+    // only machines with slower cores uses the per-line ideal above, which changes slope
+    if (kind === 'speedup' && lines.some(l => !SPEEDS[l.m])) datasets.push({
+      label: '_ideal', borderColor: css('--muted'), borderDash: [2, 3], borderWidth: 1, pointRadius: 0,
+      data: [1, 2 * nmax].map(x => ({ x, y: x })) });
     newChart(chartBox(c), { type: 'line', data: { datasets }, plugins: [endLabels],
       options: { plugins: { legend: { display: false } }, layout: { padding: { right: 160 } },
         scales: { x: ncpusAxis(nmax), y: axisStyle({ type: 'logarithmic',
@@ -438,7 +454,9 @@ function scalingCharts(c, lines) {
     ns.map(n => [n, ...lines.map(l => {
       if (!l.cv.has(n)) return '';
       const split = l.splits && l.splits.has(n) ? `, ${l.splits.get(n)}` : '';
-      return `${fmt(l.cv.get(n))} <span class="note">${fmt(100 * l.ref / (l.cv.get(n) * capacity(l.m, n)), 0)}%${split}</span>`; })])));
+      // actual speed over the ideal wall time drawn as the dotted line
+      const eff = 100 * l.ref / (l.cv.get(n) * capacity(l.m, n));
+      return `${fmt(l.cv.get(n))} <span class="note">${fmt(eff, 0)}%${split}</span>`; })])));
 }
 // time in each routine against number of cpus, for one benchmark, machine and openMP build
 // (solid), and for the fastest MPI run at each number of cores (dashed, as in the scaling charts)
@@ -493,7 +511,8 @@ function scaling() {
     'on each machine (dated): the fastest openMP build (solid lines, with dotted lines for ideal scaling), and the ' +
     'fastest MPI run at each number of cores (dashed, same colour), which can span several nodes. On machines whose ' +
     'cores differ in speed, ideal scaling changes slope where threads start to use the slower cores. Parallel ' +
-    'efficiency is relative to the openMP time at the smallest number of cores (assuming ideal scaling below it).</span>'));
+    'efficiency is the actual speed over that ideal, relative to the openMP time at the smallest number of ' +
+    'cores (assuming ideal scaling below it).</span>'));
   for (const [b, ls] of byBench) {
     section(c, `scaling-${b}`, `${b} (strong scaling)`);
     scalingCharts(c, ls);
@@ -547,7 +566,8 @@ function historyTab() {
         const n = [...new Set(rr.map(r => r.threads))].sort((p, q) => p - q);
         if (n.length < 2) continue;
         const t = k => median(rr.filter(r => r.threads === k).map(r => r.time)), n0 = n[0], n1 = n[n.length - 1];
-        pts.push({ x: sha, y: t(n0) * n0 / (t(n1) * n1) });
+        const machine = rr[0].machine;
+        pts.push({ x: sha, y: t(n0) * capacity(machine, n0) / (t(n1) * capacity(machine, n1)) });
       }
       if (pts.length) eff.push({ label: `${name} (${Math.max(...x.map(r => r.threads))} threads)`,
                                  data: pts.sort((p, q) => shaIndex(p.x) - shaIndex(q.x)) });
