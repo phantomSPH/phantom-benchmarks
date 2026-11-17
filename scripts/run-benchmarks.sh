@@ -342,25 +342,32 @@ get_timer()
 }
 #
 # the whole timer table under "step" from the last table in the phantom log, as
-# name=seconds pairs separated by ";" (rows two levels down as parent/name), e.g.
+# name=seconds pairs separated by ";" (rows below as parent/name, at every depth), e.g.
 # step=17.31;tree=3.67;tree/top=0.92;...;substep=4.74;substep/gas_force=3.23;...
+# A row's depth is its indentation: the column of its connector, two characters per level,
+# relative to the first row of the table
 #
 get_timers()
 {
   awk '{
-     i = index($0, ":"); if (i == 0) next;
-     pre = substr($0, 1, i-1); if (pre !~ /─/) next;
+     i = index($0, ":"); pre = (i > 0) ? substr($0, 1, i-1) : "";
+     if (pre !~ /─/) { start = 1; next }
      split(substr($0, i+1), v, " "); t = v[1];
-     if (t !~ /^[0-9.]+(s|min|h)$/) next;
+     if (t !~ /^[0-9.]+(s|min|h)$/) { start = 1; next }
      fac = (t ~ /min$/) ? 60. : ((t ~ /h$/) ? 3600. : 1.); sub(/[a-z]+$/, "", t);
      name = pre; gsub(/[│├└─ ]/, "", name);
-     depth = gsub(/│|├|└/, "&", pre) - 1;
+     # one ASCII character per box-drawing character, so that columns count the same in any locale
+     gsub(/│/, "|", pre); gsub(/[├└]/, "+", pre); gsub(/─/, "-", pre);
+     col = index(pre, "+");
+     if (start) { base = col; start = 0 }
+     depth = (col - base) / 2;
      val = sprintf("%.2f", fac*t);
-     if (depth == 0 && name == "step") { out = "step=" val; instep = 1; parent = ""; next }
+     if (depth == 0 && name == "step") { out = "step=" val; instep = 1; next }
      if (depth == 0) { if (instep) last = out; instep = 0; next }
      if (!instep) next;
-     if (depth == 1) { parent = name; out = out ";" name "=" val }
-     else if (depth == 2 && parent != "") out = out ";" parent "/" name "=" val;
+     path[depth] = name; full = path[1];
+     for (k = 2; k <= depth; k++) full = full "/" path[k];
+     out = out ";" full "=" val;
   } END { if (instep) last = out; print last }' $codelog;
 }
 #
