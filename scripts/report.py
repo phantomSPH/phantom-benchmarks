@@ -214,6 +214,18 @@ def routine_times(row):
     return {k: max(t, 0.) for k, t in times.items()}
 
 
+def timer_table(row):
+    """phantom's whole timer table under "step" (the timers column, as name=seconds pairs separated
+    by ";"), as {name: seconds}, or None for runs recorded before it was kept"""
+    timers = {}
+    for item in (row.get('timers') or '').split(';'):
+        name, _, value = item.partition('=')
+        t = fnum(value)
+        if name and t is not None:
+            timers[name] = t
+    return timers if timers.get('step') else None
+
+
 def breakdown(rows):
     """percentage of the wall time spent in each part, for the latest run of each build"""
     last = latest(rows, lambda r: (r['bench'], r['label'], r['nthreads'], nmpi(r)))
@@ -642,7 +654,7 @@ def site_data(rows, commits):
             'subject': info.get('subject', ''), 'date': r['date'], 'npart': fnum(r['npart']),
             'nsteps': fnum(r['nsteps']), 'time': run_time(r), 'total': fnum(r['wall']),
             'cpu_time': fnum(r.get('cpu_time')), 'mpart': fnum(r.get('mpart_per_s')),
-            'status': r['status'], 'routines': routine_times(r)})
+            'status': r['status'], 'routines': routine_times(r), 'timers': timer_table(r)})
     return runs
 
 
