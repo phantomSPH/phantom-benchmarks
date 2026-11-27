@@ -76,7 +76,7 @@ codelog="code-$label-$runtag.log";
 timelog="time-$label-$runtag.log";
 evlog="ev-$label-$runtag.log";
 makelog="make-$label.log";
-csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall,phantom_date,radiation,mpi"
+csvheader="date,machine,cpu,label,system,compiler,nthreads,nmpi,phantom_sha,phantom_branch,npart,nsteps,wall,step,tree,density,force,kickdrift,ind_eff,status,conservation,rmserr,fflags,cpu_time,mpart_per_s,code_wall,phantom_date,radiation,mpi,timers"
 phantom_sha=`git -C $phantomdir rev-parse --short HEAD`;
 phantom_branch=`git -C $phantomdir rev-parse --abbrev-ref HEAD`;
 # date of the phantom commit, so that results can be plotted in commit order
@@ -341,6 +341,36 @@ get_timer()
      printf "%.2f", fac*t }';
 }
 #
+# the whole timer table under "step" from the last table in the phantom log, as
+# name=seconds pairs separated by ";" (rows below as parent/name, at every depth), e.g.
+# step=17.31;tree=3.67;tree/top=0.92;...;substep=4.74;substep/gas_force=3.23;...
+# A row's depth is its indentation: the column of its connector, two characters per level,
+# relative to the first row of the table
+#
+get_timers()
+{
+  awk '{
+     i = index($0, ":"); pre = (i > 0) ? substr($0, 1, i-1) : "";
+     if (pre !~ /─/) { start = 1; next }
+     split(substr($0, i+1), v, " "); t = v[1];
+     if (t !~ /^[0-9.]+(s|min|h)$/) { start = 1; next }
+     fac = (t ~ /min$/) ? 60. : ((t ~ /h$/) ? 3600. : 1.); sub(/[a-z]+$/, "", t);
+     name = pre; gsub(/[│├└─ ]/, "", name);
+     # one ASCII character per box-drawing character, so that columns count the same in any locale
+     gsub(/│/, "|", pre); gsub(/[├└]/, "+", pre); gsub(/─/, "-", pre);
+     col = index(pre, "+");
+     if (start) { base = col; start = 0 }
+     depth = (col - base) / 2;
+     val = sprintf("%.2f", fac*t);
+     if (depth == 0 && name == "step") { out = "step=" val; instep = 1; next }
+     if (depth == 0) { if (instep) last = out; instep = 0; next }
+     if (!instep) next;
+     path[depth] = name; full = path[1];
+     for (k = 2; k <= depth; k++) full = full "/" path[k];
+     out = out ";" full "=" val;
+  } END { if (instep) last = out; print last }' $codelog;
+}
+#
 # write results of this run to the .csv file for this benchmark
 #
 write_csv()
@@ -355,7 +385,7 @@ write_csv()
   if [ "`head -1 $csvfile`" != "$csvheader" ]; then
      (echo "$csvheader"; tail -n +2 $csvfile) > $csvfile.tmp && mv $csvfile.tmp $csvfile;
   fi
-  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart,$codewall,$phantom_date,`get_timer radiation`,`get_mpi_version`" >> $csvfile;
+  echo "$datetagiso,$machine,`get_cpu_model | tr ',' ' '`,$label,$SYSTEM,`get_compiler_version`,$nthreads,$nmpi,$phantom_sha,$phantom_branch,$npart,$nsteps,$wall,`get_timer step`,`get_timer tree`,`get_timer density`,`get_timer force`,`get_timer kickdrift`,$ind,$status,$cons,$rmserr,$fflags,$cputime,$mpart,$codewall,$phantom_date,`get_timer radiation`,`get_mpi_version`,`get_timers`" >> $csvfile;
 }
 log_failure()
 {

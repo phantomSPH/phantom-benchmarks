@@ -242,7 +242,8 @@ function overview() {
   // by tens of per cent between versions (pull requests compare base and head on the same runner)
   const changes = findChanges(RUNS.filter(r => good(r) && r.threads === fullNode(r.machine) &&
                                           !r.machine.startsWith('github'))).filter(x => x.last);
-  c.appendChild(changes.length ? changeTable(changes) : el('p', '<span class="note">none</span>'));
+  if (changes.length) changeProfiles(c, changes);
+  else c.appendChild(el('p', '<span class="note">none</span>'));
 }
 
 // series (benchmark, machine, build, threads) whose median time changes by more than CHANGE per cent
@@ -631,8 +632,323 @@ function historyTab() {
   }
 }
 
+
+// ---------------------------------------------------------------- profile
+// Where the wall time of a run goes, as stacked bars: one bar per machine for each benchmark.
+// Runs carry `routines` (tree, density, force, radiation, other, startup: the timers already kept
+// in the results) and, where the results keep Phantom's whole timing table, `timers`
+// ({name: seconds} for the rows under "step", with "parent/child" for the rows below them).
+// With `timers` there is no "other": every timer directly under "step" is a category of its own
+// (cons2prim, the sink-gas substep, and whatever else that Phantom version times), and the part of
+// the step that no timer covers is shown as "untimed".
+const FINE = [
+  { key: 'tree', label: 'tree', colour: 0, names: ['tree'] },
+  { key: 'density', label: 'density', colour: 1, names: ['density'] },
+  { key: 'force', label: 'force', colour: 2, names: ['force'] },
+  { key: 'cons2prim', label: 'cons2prim', colour: 6, names: ['cons2prim'] },
+  { key: 'substep', label: 'sink-gas substep', colour: 7, names: ['substep'] },
+  { key: 'radiation', label: 'radiation', colour: 3, names: ['radiation'] },
+  // the leapfrog's own loops in step (timed since phantom 7df0c3449, November 2026)
+  { key: 'leapfrog', label: 'predict + correct', colour: '#0c8599', names: ['predict', 'correct'] },
+];
+// colours for timers not named above, in the order they are first met, and for "untimed"
+const EXTRA_COLOURS = ['#a61e4d', '#364fc7', '#d9480f', '#087f5b', '#e64980'];
+const UNTIMED = { key: 'untimed', label: 'untimed (rest of step)', colour: '#adb5bd', names: [] };
+// startup (reading the dump, initial derivatives: the run's wall time less Phantom's own clock), in
+// both splits, so that a run's total is the same whether or not it kept the full timing table
+const STARTUP = { key: 'startup', label: 'startup', colour: '#495057', names: [] };
+const coarseCats = (startup = true) => ROUTINES.filter(k => startup || k !== 'startup')
+  .map((k, i) => k === 'startup' ? STARTUP : { key: k, label: k, colour: i });
+const catColour = c => typeof c.colour === 'number' ? colour(c.colour) : c.colour;
+let profileUnit = 'seconds';
+let changeAlign = false;   // overview change charts: the quicker run stacked, or aligned with the slower
+
+// categories for a set of runs with timers: those in FINE, then every other timer directly under
+// step that any of the runs has, then "untimed" and (unless startup is false) "startup"
+function fineCats(runs, startup = true) {
+  const extra = [];
+  for (const r of runs) {
+    for (const n of Object.keys(r.timers || {})) {
+      if (n !== 'step' && !n.includes('/') && !FINE.some(c => c.names.includes(n)) && !extra.includes(n)) extra.push(n);
+    }
+  }
+  return [...FINE, ...extra.map((n, i) => ({ key: 't:' + n, label: n, colour: EXTRA_COLOURS[i % EXTRA_COLOURS.length], names: [n] })),
+          UNTIMED, ...(startup ? [STARTUP] : [])];
+}
+// split of one run's calculation time into those categories, with the rows inside each category
+// for the hover text; scaled, like `routines`, so the parts add up to the run time, plus startup
+// when cats has it
+function fineSplit(r, cats) {
+  const t = r.timers, step = t && t.step;
+  if (!step) return null;
+  const parts = {}, inside = {};
+  for (const c of cats) {
+    parts[c.key] = c.names.reduce((s, n) => s + (t[n] || 0), 0);
+    // a category of several timers lists them; one of one timer lists the rows inside it
+    inside[c.key] = c.names.length > 1 ? c.names.filter(n => n in t).map(n => [n, t[n]]) :
+      Object.entries(t).filter(([n]) => c.names.some(p => n.startsWith(p + '/')) && n.split('/').length === 2)
+        .map(([n, s]) => [n.split('/').pop(), s]);
+  }
+  parts.untimed = Math.max(step - cats.reduce((s, c) => s + parts[c.key], 0), 0);
+  const scale = (r.time || step) / step;
+  Object.keys(parts).forEach(k => { parts[k] *= scale; });
+  inside.scale = scale;
+  parts.startup = cats.includes(STARTUP) && r.routines ? r.routines.startup || 0 : 0;
+  return { parts, inside, total: (r.time || step) + parts.startup };
+}
+// the same for the routines kept in every result (no detail inside "other")
+function coarseSplit(r) {
+  if (!r.routines) return null;
+  const parts = Object.assign({}, r.routines);
+  const total = ROUTINES.reduce((s, k) => s + (parts[k] || 0), 0);
+  return { parts, inside: {}, total };
+}
+// the run behind the fastest one-node result of each machine for a benchmark (as in Hardware): of
+// the repeats of that configuration, the one nearest their median time, which Hardware shows
+function profileRuns(b) {
+  const out = [];
+  for (const [m, x] of bestPerMachine(b)) {
+    const n = x.node;
+    const r = RUNS.filter(q => ok(q) && q.bench === b && q.machine === m && q.label === n.label &&
+      q.nmpi === n.nmpi && q.threads === n.threads && q.sha === n.sha && (q.routines || q.timers))
+      .reduce((a, q) => !a || Math.abs(q.time - n.time) < Math.abs(a.time - n.time) ? q : a, null);
+    if (r) out.push({ name: mlabel(m), title: m, sub: `${compName(r)}, ${cpusText(n)}, ${r.date.slice(0, 10)}`, run: r });
+  }
+  return out;
+}
+// a run's total time, to the end of its bar: the bars may be shares, so the total is given in seconds.
+// In percent, a thin grey line under each bar also shows the total to scale, the longest run in
+// the chart spanning the full width
+const fmtTime = t => t < 10 ? `${t.toFixed(2)} s` : t < 100 ? `${t.toFixed(1)} s` : `${t.toFixed(0)} s`;
+const barTotals = {
+  id: 'barTotals',
+  afterDatasetsDraw(chart) {
+    const tot = (chart.options.plugins.barTotals || {}).totals;
+    if (!tot) return;
+    const ctx = chart.ctx; ctx.save(); ctx.font = '12px system-ui'; ctx.fillStyle = css('--muted'); ctx.textBaseline = 'middle';
+    chart.data.labels.forEach((_, i) => {
+      let x = null, y = null;
+      chart.data.datasets.forEach((d, k) => {
+        const e = chart.getDatasetMeta(k).data[i];
+        const v = d.data[i], on = Array.isArray(v) ? v[1] > v[0] : v > 0;
+        if (chart.isDatasetVisible(k) && e && on && (x === null || e.x > x)) { x = e.x; y = e.y; }
+      });
+      if (x !== null) ctx.fillText(tot[i], x + 6, y);
+    });
+    const secs = chart.options.plugins.barTotals.lines;
+    if (secs) {
+      const xs = chart.scales.x, smax = Math.max(...secs), meta = chart.getDatasetMeta(0);
+      ctx.strokeStyle = css('--muted'); ctx.lineWidth = 2;
+      secs.forEach((t, i) => {
+        const e = meta.data[i];
+        if (!e) return;
+        const y = e.y + e.height / 2 + 3;
+        ctx.beginPath(); ctx.moveTo(xs.left, y); ctx.lineTo(xs.left + (xs.right - xs.left) * t / smax, y); ctx.stroke();
+      });
+    }
+    ctx.restore();
+  }
+};
+// rows of an aligned chart whose parts overlap are drawn by this plugin instead: the row is split
+// into lanes, each part in the first lane free of the parts it overlaps, so that no part hides
+// another (two overlapping parts give two half-height lanes; the chart draws those parts
+// transparent, and they keep their hover)
+const laneBars = {
+  id: 'laneBars',
+  afterDatasetsDraw(chart) {
+    const o = chart.options.plugins.laneBars;
+    if (!o || !o.rows.length) return;
+    const ctx = chart.ctx; ctx.save();
+    for (const [i, lanes, n] of o.rows) {
+      chart.data.datasets.forEach((d, k) => {
+        const e = chart.getDatasetMeta(k).data[i];
+        if (lanes[k] === undefined || !e || !chart.isDatasetVisible(k)) return;
+        const x0 = Math.min(e.base, e.x), w = Math.abs(e.x - e.base), h = e.height / n;
+        ctx.fillStyle = o.colours[k];
+        ctx.fillRect(x0, e.y - e.height / 2 + lanes[k] * h, Math.max(w - 1, 0.5), h);
+      });
+    }
+    ctx.restore();
+  }
+};
+// lanes for the parts of one aligned row ([start, end] per part, null for none): {part: lane} and
+// the number of lanes, by greedy interval colouring in order of start
+function assignLanes(segs) {
+  const ends = [], lanes = {};
+  segs.map((g, k) => [g, k]).filter(([g]) => g).sort((p, q) => p[0][0] - q[0][0]).forEach(([g, k]) => {
+    let l = ends.findIndex(e => e <= g[0] + 1e-9);
+    if (l < 0) { l = ends.length; ends.push(0); }
+    ends[l] = g[1]; lanes[k] = l;
+  });
+  return [lanes, ends.length];
+}
+// one stacked bar chart: bars = [{name, sub, split, alignTo}], cats = [{key, label, colour}]
+// compact: no title, legend or x axis, and a short box with no margin (the Overview's change rows)
+// A bar with alignTo = j (seconds only) starts each of its parts where that part starts in bar j, so
+// that a part's gain or loss shows at its own place; the chart is then drawn with floating bars,
+// each part from its start to its end.
+function profileChart(parent, title, bars, cats, unit = profileUnit, compact = false) {
+  const pct = unit === 'percent';
+  const used = cats.filter(c => bars.some(bar => (bar.split.parts[c.key] || 0) > 0));
+  const size = (bar, k) => pct ? 100 * (bar.split.parts[k] || 0) / bar.split.total : (bar.split.parts[k] || 0);
+  const floating = !pct && bars.some(bar => bar.alignTo !== undefined);
+  const starts = bars.map(bar => { let x = 0; return Object.fromEntries(used.map(c => { const s0 = x; x += size(bar, c.key); return [c.key, s0]; })); });
+  const val = (bar, k, i) => {
+    if (!floating) return size(bar, k);
+    const v = size(bar, k);
+    if (!(v > 0)) return null;
+    const s0 = starts[bar.alignTo !== undefined ? bar.alignTo : i][k];
+    return [s0, s0 + v];
+  };
+  // aligned rows with overlapping parts, drawn in lanes (laneBars): [row, {part: lane}, lanes]
+  const laneRows = floating ? bars.map((bar, i) => bar.alignTo === undefined ? null :
+    [i, ...assignLanes(used.map(c => val(bar, c.key, i)))]).filter(x => x && x[2] > 1) : [];
+  const laneIdx = laneRows.map(x => x[0]);
+  let canvas;
+  if (compact) {
+    const box = el('div'); box.className = 'chart';
+    Object.assign(box.style, { height: (12 + 24 * bars.length) + 'px', margin: '0', padding: '2px 0 2px 24px' });
+    canvas = el('canvas'); box.appendChild(canvas); parent.appendChild(box);
+  } else canvas = chartBox(parent, 80 + 44 * bars.length);
+  newChart(canvas, { type: 'bar', plugins: [barTotals, laneBars],
+    data: { labels: bars.map(bar => bar.name),
+      datasets: used.map(c => ({ label: c.label, stack: 'run', borderColor: css('--panel'),
+        backgroundColor: ctx => laneIdx.includes(ctx.dataIndex) ? 'transparent' : catColour(c),
+        borderWidth: ctx => laneIdx.includes(ctx.dataIndex) ? 0 : { right: 1 },
+        data: bars.map((bar, i) => val(bar, c.key, i)) })) },
+    options: { indexAxis: 'y',
+      layout: { padding: { right: compact ? 48 : 64 } },
+      plugins: { title: { display: !compact, text: title }, barTotals: { totals: bars.map(bar => fmtTime(bar.split.total)),
+                                                       lines: pct ? bars.map(bar => bar.split.total) : null },
+        laneBars: { rows: laneRows, colours: used.map(catColour) },
+        // legend swatches in each part's own colour (the lane rows draw their parts transparent)
+        legend: { display: !compact, labels: { usePointStyle: true, boxHeight: 7, generateLabels: chart =>
+          Chart.defaults.plugins.legend.labels.generateLabels(chart).map((l, k) =>
+            Object.assign(l, { fillStyle: catColour(used[k]), strokeStyle: catColour(used[k]) })) } },
+        tooltip: { callbacks: {
+          title: items => { const bar = bars[items[0].dataIndex]; return [bar.name, bar.sub].filter(Boolean); },
+          label: ctx => {
+            const bar = bars[ctx.dataIndex], k = used[ctx.datasetIndex].key, s = bar.split.parts[k] || 0;
+            return `${ctx.dataset.label}: ${fmt(s, 2)} s (${fmt(100 * s / bar.split.total)}%)`;
+          },
+          afterLabel: ctx => {
+            const bar = bars[ctx.dataIndex], k = used[ctx.datasetIndex].key;
+            const rows = (bar.split.inside[k] || []).slice(0, 6), sc = bar.split.inside.scale || 1;
+            return rows.map(([n, s]) => `   ${n}: ${fmt(s * sc, 2)} s`);
+          },
+          footer: items => `total ${fmt(bars[items[0].dataIndex].split.total, 2)} s` } } },
+      scales: { x: axisStyle({ display: !compact, stacked: !floating, min: 0, max: pct ? 100 : undefined,
+                               title: axisTitle(pct ? 'share of the run time (%)' : 'time (s)') }),
+                y: axisStyle({ stacked: true, title: { display: false } }) } } });
+}
+// the overview's list of changes between Phantom versions, as one table: the column headings once,
+// then for each change its row and, below it, a compact profile chart with a bar for the run before
+// and a bar for the run after (the run nearest the median time of each version; the bars leave out
+// startup, as the table's times do). One legend above the table serves every chart: all charts use the same colours. The
+// table is a CSS grid rather than a <table>, since Chart.js does not size itself inside table cells
+function changeProfiles(c, changes) {
+  const pick = (x, sha) => {
+    const rs = RUNS.filter(r => good(r) && r.bench === x.key[0] && r.machine === x.key[1] && r.label === x.key[2] &&
+      String(r.threads) === x.key[3] && r.sha === sha && (r.routines || r.timers));
+    if (!rs.length) return null;
+    const t = median(rs.map(r => r.time));
+    return rs.reduce((a, r) => Math.abs(r.time - t) < Math.abs(a.time - t) ? r : a);
+  };
+  const rows = changes.map(x => ({ x, r0: pick(x, x.sha0), r1: pick(x, x.sha1) }));
+  const runs = rows.flatMap(w => [w.r0, w.r1]).filter(Boolean);
+  // one set of categories, and so one set of colours, for every chart
+  const fine = runs.length && runs.every(r => r.timers);
+  // without startup, so that each bar's total is the run's time, as in the table
+  const cats = fine ? fineCats(runs, false) : coarseCats(false);
+  const split = r => {
+    if (fine) return fineSplit(r, cats);
+    const s = coarseSplit(r);
+    if (s) { s.total -= s.parts.startup || 0; delete s.parts.startup; }
+    return s;
+  };
+  rows.forEach(w => {
+    if (!w.r0 || !w.r1) return;
+    w.bars = [['from', w.x.sha0, w.r0], ['to', w.x.sha1, w.r1]].map(([name, sha, r]) =>
+      ({ name, sub: `${sha}, ${r.date.slice(0, 10)}${r.subject ? ': ' + r.subject : ''}`, split: split(r) }));
+    // aligned: the quicker run with each part starting where it starts in the slower run
+    if (changeAlign) {
+      const [qi, si] = w.bars[1].split.total <= w.bars[0].split.total ? [1, 0] : [0, 1];
+      w.bars[qi].alignTo = si;
+    }
+  });
+  const toggle = el('p', '<span class="note">Quicker run:</span> ' + [[false, 'stacked'], [true, 'aligned with the slower run']]
+    .map(([a, t]) => `<a href="#changes" data-align="${a}"${a === changeAlign ? ' style="font-weight:600"' : ''}>${t}</a>`).join(' · '));
+  toggle.querySelectorAll('a').forEach(a => a.addEventListener('click', ev => {
+    ev.preventDefault(); changeAlign = a.dataset.align === 'true'; current = null; show('overview');
+    const h = document.getElementById('changes'); if (h) h.scrollIntoView(); }));
+  c.appendChild(toggle);
+  const used = cats.filter(k => rows.some(w => w.bars && w.bars.some(b => (b.split.parts[k.key] || 0) > 0)));
+  c.appendChild(el('p', used.map(k => `<span style="display:inline-flex;align-items:center;margin-right:14px">` +
+    `<i style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;background:${catColour(k)}"></i>` +
+    `${k.label}</span>`).join('')));
+  // a grid of divs with the roles of a table (rows as display: contents, so that their cells sit in
+  // the grid's columns), so that screen readers read it as a table
+  const grid = el('div');
+  grid.setAttribute('role', 'table'); grid.setAttribute('aria-label', 'changes of more than 5%, with the profile of each');
+  Object.assign(grid.style, { display: 'grid', gridTemplateColumns: 'max-content '.repeat(7) + '1fr',
+                              fontVariantNumeric: 'tabular-nums', margin: '8px 0' });
+  const row = () => { const r = el('div'); r.setAttribute('role', 'row'); r.style.display = 'contents'; grid.appendChild(r); return r; };
+  const cell = (r, html, opts = {}) => {
+    const d = el('div', html);
+    d.setAttribute('role', opts.role || 'cell');
+    Object.assign(d.style, { padding: '4px 10px', whiteSpace: 'nowrap', borderBottom: `1px solid ${css('--line')}`,
+                             textAlign: opts.left ? 'left' : 'right' }, opts.style || {});
+    r.appendChild(d);
+    return d;
+  };
+  const head = row();
+  ['benchmark', 'machine', 'compiler', 'threads', 'from', 'to', 'time (s)', 'change'].forEach((h, i) =>
+    cell(head, h, { role: 'columnheader', left: i === 0, style: { color: css('--muted'), fontWeight: '600' } }));
+  for (const w of rows) {
+    const x = w.x, r = row();
+    [x.key[0], mcell(x.key[1]), compHtml(compOf(x.key[1], x.key[2])), x.key[3], x.sha0,
+     `<span title="${x.subject}">${x.sha1}</span>`, `${fmt(x.t0)} → ${fmt(x.t1)}`].forEach((v, i) =>
+      cell(r, v, { left: i === 0, style: { borderBottom: 'none', paddingBottom: '0' } }));
+    cell(r, `${x.pct > 0 ? '+' : ''}${fmt(x.pct)}%`, { style: { borderBottom: 'none', paddingBottom: '0',
+      color: css(x.pct > 0 ? '--bad' : '--good'), fontWeight: x.pct > 0 ? '' : '600' } });
+    // the chart: a row of its own, one cell across every column, described for screen readers by
+    // the two totals (the chart itself is a canvas)
+    const box = cell(row(), '', { style: { gridColumn: '1 / -1', padding: '0 0 4px 0' } });
+    if (w.bars) {
+      box.setAttribute('aria-label', `profile of the run before, ${fmtTime(w.bars[0].split.total)}, and after, ${fmtTime(w.bars[1].split.total)}`);
+      profileChart(box, '', w.bars, cats, 'seconds', true);
+    }
+  }
+  c.appendChild(grid);
+}
+function profile() {
+  const c = content();
+  const toggle = el('p', '<span class="note">Show bars as:</span> ' +
+    ['seconds', 'percent'].map(u => `<a href="#profile" data-unit="${u}"${u === profileUnit ? ' style="font-weight:600"' : ''}>${u}</a>`).join(' · '));
+  toggle.querySelectorAll('a').forEach(a => a.addEventListener('click', ev => {
+    ev.preventDefault(); profileUnit = a.dataset.unit; current = null; show('profile'); }));
+  c.appendChild(toggle);
+  jumpTo(c, benches().map(b => [`profile-${b}`, b]));
+  c.appendChild(el('p', '<span class="note">Where the time of each run goes, from Phantom\'s own timers: the fastest ' +
+    'result on one node of each machine, latest Phantom version (as in the Hardware tab). Hover a segment for its time. ' +
+    'The number after each bar is the run\'s total time; in percent, the thin grey line under each bar shows that total ' +
+    'to scale, the longest run in the chart spanning the full width. Where every run in a chart kept Phantom\'s full ' +
+    'timing table, each timer under the step is shown, and "untimed" is what no timer covers; otherwise the runs are ' +
+    'split into tree, density, force and radiation, with "other" the rest of the step. "startup" is reading the ' +
+    'initial dump and computing the initial derivatives.</span>'));
+  for (const b of benches()) {
+    const rs = profileRuns(b);
+    if (!rs.length) continue;
+    section(c, `profile-${b}`, `${b}: time per routine on each machine`);
+    const fine = rs.every(x => x.run.timers), cats = fine ? fineCats(rs.map(x => x.run)) : null;
+    profileChart(c, fine ? 'time per routine (full timing table)' : 'time per routine',
+      rs.map(x => ({ name: x.name, sub: x.sub, split: fine ? fineSplit(x.run, cats) : coarseSplit(x.run) })),
+      fine ? cats : coarseCats());
+  }
+}
+
 // ---------------------------------------------------------------- tabs
-const TABS = { overview, compilers, hardware, scaling, history: historyTab };
+const TABS = { overview, compilers, hardware, scaling, history: historyTab, profile };
 let current = null;
 function show(tab) {
   if (!TABS[tab]) tab = 'overview';
@@ -644,7 +960,8 @@ function show(tab) {
   }
 }
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => {
-  window.history.replaceState(null, '', '#' + b.dataset.tab); show(b.dataset.tab); window.scrollTo(0, 0); }));
+  try { window.history.replaceState(null, '', '#' + b.dataset.tab); } catch (e) { /* not allowed here */ }
+  show(b.dataset.tab); window.scrollTo(0, 0); }));
 fetch('data.json').then(r => r.json()).then(d => {
   RUNS = d.runs.filter(r => r.time > 0);
   // older results lack the compiler version or MPI library: take them from the latest run of the

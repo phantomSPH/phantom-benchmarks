@@ -101,9 +101,10 @@ On Phantom pull requests this happens automatically on a GitHub-hosted runner if
 
 The [website](https://phantomsph.github.io/phantom-benchmarks/) is rebuilt from the results in `results/` whenever they change. Its tabs answer:
 
-- **Overview:** the fastest time for each benchmark on each machine, and any recent change of more than 5% in speed;
+- **Overview:** the fastest time for each benchmark on each machine, and any recent change of more than 5% in speed, with the time in each routine before and after the change;
 - **Compilers:** the fastest compiler for a benchmark on each machine, or overall (geometric mean over benchmarks);
 - **Hardware:** the best hardware for a benchmark, or in general, compared both by time on a whole node and by cost per core (core-seconds);
+- **Profile:** where the time of each benchmark goes on each machine, as the time in each of Phantom's timers. Runs keep Phantom's whole timer table under "step" (the `timers` column of the results), so every timer is shown; runs from before it was kept are split into tree, density, force, radiation and other;
 - **Scaling:** strong scaling of one benchmark across machines, or of all benchmarks on one machine, with the time spent in each routine (tree, density, force, other, startup). Figures and LaTeX tables for computing time applications can be downloaded from this tab;
 - **History:** time and parallel efficiency against Phantom version, in the order of the commits, with the date on the top axis. Repeated runs of the same version show the spread between runs.
 
